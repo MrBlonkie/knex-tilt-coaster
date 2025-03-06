@@ -29,19 +29,20 @@ void loop() {
   delay(500);
   Serial.println("Gates are open, press O to close");
   
-  WaitForInput('0', "Closing gates.........");
+  WaitForInput('O', "Closing gates.........");
   delay(500);
   Serial.println("------------------------------------");
   Serial.println("Coaster ready for dispatch, press E to start");
  
   WaitForInput('E', "Coaster is starting");
+  delay(1000);
 
 }
 
 
 void WaitForInput(char expectedChar, String succesMessage) {
    
-    expectedChar = toupper(expectedChar);e
+    expectedChar = toupper(expectedChar);
 
     while (true) {
         if (Serial.available() > 0) {
@@ -51,14 +52,11 @@ void WaitForInput(char expectedChar, String succesMessage) {
             if (input == expectedChar) { 
                 Serial.println(succesMessage);
                 break;
-            } else {
-              Serial.println("input doesnt match instructions, try again.");
-            }
-            
+            }      
         }
     }
 }
 
 void DispatchCoaster() {
-  
+
 }
