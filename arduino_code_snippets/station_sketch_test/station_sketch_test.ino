@@ -1,8 +1,8 @@
 #include <Stepper.h>
 
-#define hallSensorEnterStation 23
+#define hallSensorEnterStation 21
 #define hallSensorStartPosition 22
-#define hallSensorExitStation 21
+#define hallSensorExitStation 23
 
 
 bool isCoasterDispatched = false;
@@ -27,7 +27,10 @@ void setup() {
 
 void loop() {
 
-  EnterStation();
+  while(digitalRead(hallSensorStartPosition) == HIGH) {
+    Serial.println("coaster NOT in START POSITION");
+    delay(500);
+  }
 
   Serial.println("");
   Serial.println("coaster IN start position, READY to START");
@@ -50,8 +53,8 @@ void loop() {
   WaitForInput('E', "Coaster is starting");
   isCoasterDispatched = true;
 
-  for(int i = 0; i<2 ; i++) {
-  stationStepper.step(stepsStation);
+  for(int i = 0; i<10 ; i++) {
+  liftHillStepper.step(stepsLiftHill);
   }
   
   delay(1000);
@@ -83,15 +86,11 @@ void EnterStation() {
 
   while(digitalRead(hallSensorEnterStation) == HIGH) {
     Serial.println("coaster NOT in STATION");
+    delay(500);
   }
 
-  while (digitalRead(hallSensorStartPosition) == HIGH) {
-    for (int i = 0; i < stepsStation; i++) {
-        stationStepper.step(1);  
-        if (digitalRead(hallSensorStartPosition) == LOW) break;
-    }
-}
-
+  for(int i = 0; i< ; i++) {
+  stationStepper.step(stepsStation);
+  }
 
 }
-
