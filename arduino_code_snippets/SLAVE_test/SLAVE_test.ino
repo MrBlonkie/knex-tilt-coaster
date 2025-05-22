@@ -95,32 +95,44 @@ void setup() {
   pinMode(hallSensorOffTiltdrop, INPUT);
 
   tiltTrackStepper.setSpeed(10);
+  releaseServo.attach(SERVO_PIN);
 
   Serial.println("SLAVE klaar voor gebruik.\n");
 }
 
 void loop() {
+
   char commandBuffer[100];
 
-if (receiveCommand(commandBuffer, sizeof(commandBuffer))) {
-  Serial.print("Ontvangen commando: ");
-  Serial.println(commandBuffer);
+  if (receiveCommand(commandBuffer, sizeof(commandBuffer))) {
+    Serial.print("Ontvangen commando: ");
+    Serial.println(commandBuffer);
 
-  Serial.print("Vergelijk met IS_TILTDROP_CLOSED... ");
-  if (strcmp(commandBuffer, "IS_TILTDROP_CLOSED") == 0) {
-    Serial.println("MATCH!");
-    tiltTrackStepper.setSpeed(10); // <-- nodig
-    bool closed = IsTiltdropClosed();
-    if (closed) sendLog("TILTDROP_CLOSED");
-    else        sendLog("TILTDROP_OPEN");
-  } else {
-    Serial.println("GEEN MATCH!");
+    if (strcmp(commandBuffer, "IS_TILTDROP_CLOSED") == 0) {
+      bool closed = IsTiltdropClosed();
+      if (closed) sendLog("TILTDROP_CLOSED");
+      else        sendLog("TILTDROP_OPEN");
+    } 
+
+    if(strcmp(commandBuffer, "IS_COASTER_ON_TILTDROP") == 0) {
+      EnterTiltdrop();
+      sendLog("COASTER_ON_TILTDROP");
+    }
+
+    if(strcmp(commandBuffer, "DROP") == 0) {
+      bool drop = Tiltdrop();
+      if(drop){
+        DropCoaster();
+        sendLog("COASTER_DROPPED");
+      } else {
+        sendLog("NO_DROP");
+      }     
+    }
+
   }
-}
 
-
-  // Delay optioneel om CPU wat ademruimte te geven
   delay(10);
+
 }
 
 bool IsTiltdropClosed() {
@@ -142,12 +154,8 @@ bool IsTiltdropClosed() {
   for (int i = 0; i < 2048; i++) {
     tiltTrackStepper.step(1);
 
-    if (i % 100 == 0) {
-      Serial.print("... stappen: "); Serial.println(i);
-    }
-
     if (digitalRead(hallSensorTiltdropClosed) == LOW) {
-      tiltTrackStepper.step(5);
+      tiltTrackStepper.step(10);
       sendLog("Tiltdrop CLOSED after movement.");
       Serial.println("✅ Gesloten na beweging.");
       return true;
@@ -158,6 +166,70 @@ bool IsTiltdropClosed() {
   Serial.println("❌ ERROR: Kon Tiltdrop niet sluiten na 2048 stappen.");
   return false;
 }
+
+
+void EnterTiltdrop()
+{
+  while (digitalRead(hallSensorOnTiltdrop) == HIGH) {
+    Serial.println("coaster NOT on TILTDROP");
+  }
+
+  delay(500);
+  Serial.println("coaster ON TILTDROP");
+  delay(500);
+  Serial.println("lifthill sequence stop");
+  delay(500);
+
+}
+
+bool Tiltdrop()
+{
+  tiltTrackStepper.setSpeed(5);
+  delay(500);
+  
+  for (int i = 0; i < 2048; i++) {
+    tiltTrackStepper.step(-1);
+
+    if (digitalRead(hallSensorTiltdropOpen) == LOW) {
+      Serial.println("Tiltdrop detected, doing extra steps to make sure it's open");
+      tiltTrackStepper.step(-30);
+      Serial.println("Tiltdrop OPEN, ready for drop");
+      return true;
+    }
+  }
+
+  Serial.println("ERROR: Failed to open Tiltdrop within step limit");
+  return false;
+
+}
+
+void DropCoaster()
+{
+  for(int posDegrees = 0; posDegrees <= 90; posDegrees++) {
+    releaseServo.write(posDegrees);
+    delay(10);
+  }
+
+  delay(1000);
+  Serial.println("Coaster released");
+  delay(2000);
+
+  for(int posDegrees = 90; posDegrees >= 0; posDegrees--) {
+    releaseServo.write(posDegrees);
+    delay(20);
+  }
+
+  Serial.println("Servo gesloten.");
+  delay(100);
+
+  Serial.println("Track resetten...");
+  tiltTrackStepper.setSpeed(12);
+  delay(500);
+  tiltTrackStepper.step(stepsTiltTrack);
+  delay(500);
+
+}
+
 
 void sendLog(const char* message) {
   struct_message msg;

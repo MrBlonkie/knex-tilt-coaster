@@ -2,7 +2,7 @@
 #include <esp_now.h>
 #include "Message.h"
 
-uint8_t slaveAddress[] = {0xF8, 0xB3, 0xB7, 0x33, 0x23, 0x00};  // Vervang door *jouw* SLAVE MAC
+uint8_t tiltdropSlave[] = {0xF8, 0xB3, 0xB7, 0x33, 0x23, 0x00};  // Vervang door *jouw* SLAVE MAC
 
 volatile bool newDataAvailable = false;
 struct_message latestIncoming;
@@ -26,11 +26,11 @@ void setup() {
   esp_now_register_recv_cb(OnDataRecv);
 
   esp_now_peer_info_t slaveInfo = {};
-  memcpy(slaveInfo.peer_addr, slaveAddress, 6);
+  memcpy(slaveInfo.peer_addr, tiltdropSlave, 6);
   slaveInfo.channel = 0;
   slaveInfo.encrypt = false;
 
-  if (!esp_now_is_peer_exist(slaveAddress)) {
+  if (!esp_now_is_peer_exist(tiltdropSlave)) {
     esp_now_add_peer(&slaveInfo);
   }
 
@@ -42,10 +42,18 @@ void setup() {
 }
 
 void loop() {
-  delay(1000);
+  delay(5000);
 
-  sendCommand("IS_TILTDROP_CLOSED", slaveAddress);
+  sendCommand("IS_TILTDROP_CLOSED", tiltdropSlave);
   TiltdropResponse();
+  //lifthill motor go brrr
+
+  sendCommand("IS_COASTER_ON_TILTDROP", tiltdropSlave);
+  CoasterOnTiltdropResponse();
+
+  sendCommand("DROP", tiltdropSlave);
+  DropResponse();
+
 
 }
 
@@ -71,11 +79,11 @@ void sendCommand(const char* commandText, const uint8_t* destinationMAC) {
   }
 }
 
-void TiltdropResponse() {
+bool TiltdropResponse() {
 
   while(!newDataAvailable){
     Serial.println("wachten op respone");
-    delay(500);
+    delay(2000);
   }
 
   Serial.print("Verwerkt ontvangen data: ");
@@ -83,15 +91,65 @@ void TiltdropResponse() {
 
   if (strcmp(latestIncoming.text, "TILTDROP_CLOSED") == 0) {
     // bv. update statusvariabele of trigger actie
-    Serial.println("TODO: lifthill motor aansturen");
+    newDataAvailable = false;
+    return true;
   }
   else if (strcmp(latestIncoming.text, "TILTDROP_OPEN") == 0) {
     // andere actie
     Serial.println("TODO: wachten en later opnieuw checken");
   } else {
     Serial.println("Something went wrong. Please check logs and reset.");
+    Serial.println(latestIncoming.text);
+    newDataAvailable = false;
+    return false;
   }
   
   // Data verwerkt, reset flag
   newDataAvailable = false;
+  return false;
 }
+
+bool CoasterOnTiltdropResponse() {
+  while(!newDataAvailable){
+    Serial.println("wachten op respone");
+    delay(2000);
+  }
+
+  Serial.print("Verwerkt ontvangen data: ");
+  Serial.println(latestIncoming.text);
+
+  if (strcmp(latestIncoming.text, "COASTER_ON_TILTDROP") == 0) {
+    // bv. update statusvariabele of trigger actie
+    Serial.println("Coaster is on tiltdrop, ready for drop");
+    newDataAvailable = false;
+    return true;
+  } else {
+    Serial.println("Something went wrong. Please check logs and reset.");
+    Serial.println(latestIncoming.text);
+    newDataAvailable = false;
+    return false;
+    }
+  }
+
+bool DropResponse() {
+while(!newDataAvailable){
+    Serial.println("wachten op respone");
+    delay(200);
+  }
+
+  Serial.print("Verwerkt ontvangen data: ");
+  Serial.println(latestIncoming.text);
+
+  if (strcmp(latestIncoming.text, "COASTER_DROPPED") == 0) {
+    // bv. update statusvariabele of trigger actie
+    Serial.println("Coaster dropped, ready for next sequence");
+    newDataAvailable = false;
+    return true;
+  } else {
+    Serial.println("Something went wrong. Please check logs and reset.");
+    Serial.println(latestIncoming.text);
+    newDataAvailable = false;
+    return false;
+    }
+  }
+
