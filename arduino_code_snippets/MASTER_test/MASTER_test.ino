@@ -85,6 +85,9 @@ void loop() {
   delay(5000);
   WaitForInput('S', "Starting........");
 
+  sendCommand("DISPATCH", stationSlave);
+  bool isCoasterDispatched = DispatchResponse();
+
   bool tiltdropStatus = false;
   while(!tiltdropStatus){
   sendCommand("IS_TILTDROP_CLOSED", tiltdropSlave);
@@ -124,6 +127,7 @@ void sendCommand(const char* commandText, const uint8_t* destinationMAC) {
     Serial.println(result);
   }
 }
+
 
 void StartAndStopLifthillMotor(){
   sendCommand("LIFTHILL_MOTOR_ON", stationSlave);
@@ -177,16 +181,19 @@ bool TiltdropResponse(int maxRetries) {
   return false;
 }
 
+bool DispatchResponse() {
+  WaitOnData();
+
+  if (strcmp(latestIncoming.text, "COASTER_DISPATCHED") == 0) {
+    Serial.println("coaster dispatched, check for bottomsensor");
+    newDataAvailable = false;
+    return true;
+  }
+}
 
 bool LifthillResponse() {
 
-  while(!newDataAvailable){
-    Serial.println("wachten op respone");
-    delay(2000);
-  }
-
-  Serial.print("Verwerkt ontvangen data: ");
-  Serial.println(latestIncoming.text);
+  WaitOnData();
 
   if (strcmp(latestIncoming.text, "MOTOR_RUNNING") == 0) {
     Serial.println("station motor running");
@@ -263,4 +270,14 @@ void WaitForInput(char expectedChar, String succesMessage)
       }
     }
   }
+}
+
+void WaitOnData() {
+  while(!newDataAvailable){
+    Serial.println("wachten op response");
+    delay(1000);
+  }
+
+  Serial.print("Verwerkt ontvangen data: ");
+  Serial.println(latestIncoming.text);
 }

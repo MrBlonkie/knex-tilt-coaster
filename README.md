@@ -3,12 +3,18 @@
 TODO:
 - klemmen voor kabels (voeding)
 - zekering? vragen aan MRG
-
-PROGRAM:
-- ping pong bij opstarten met alle ESP's
-- verschillende modi
+- sensor states (block zoning)
+- bottomLifthillSensor implementeren
+- hallsensor achter drop wordt niet getriggerd
+- flow programma
 - clean up code with .h files
 
+PROGRAM FEATURES:
+- ping pong bij opstarten met alle ESP's
+- verschillende modi
+
+
+<img src="/pictures/tiltdrop_WIP.jpg">
 
 aanpak:
 

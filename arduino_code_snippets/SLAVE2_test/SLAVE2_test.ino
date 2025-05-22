@@ -7,6 +7,7 @@
 #define hallSensorEnterStation     26
 #define hallSensorStartPosition    25
 #define hallSensorExitStation      33
+bool hallSensorExitStationState = false;
 #define hallSensorBottomLifthill   32
 #define hallSensorTopLifthill      34
 
@@ -33,7 +34,7 @@ uint8_t masterAddress[] = {0x14, 0x2B, 0x2F, 0xC9, 0x24, 0xCC}; // MASTER MAC-ad
 volatile bool newCommandAvailable = false;
 struct_message incomingCommand;
 
-// ✅ Callback voor inkomende ESP-NOW data
+// Callback voor inkomende ESP-NOW data
 void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   struct_message incoming;
   memcpy(&incoming, data, sizeof(incoming));
@@ -49,7 +50,7 @@ void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   }
 }
 
-// ✅ Stuurt een "pong" terug naar de master
+// Stuurt een "pong" terug naar de master
 void sendPong(const char* responseText) {
   struct_message msg;
   strncpy(msg.text, responseText, sizeof(msg.text) - 1);
@@ -61,7 +62,7 @@ void sendPong(const char* responseText) {
   esp_now_send(masterAddress, (uint8_t*)&msg, sizeof(msg));
 }
 
-// ✅ Haalt binnengekomen commando uit de buffer
+// Haalt binnengekomen commando uit de buffer
 bool receiveCommand(char* buffer, size_t bufferSize) {
   if (!newCommandAvailable) return false;
 
@@ -124,14 +125,20 @@ void loop() {
     Serial.println(commandBuffer);
 
     if (strcmp(commandBuffer, "LIFTHILL_MOTOR_ON") == 0) {
-      StartMotor();  // nieuwe functie
+      StartMotor();
       sendLog("MOTOR_RUNNING");
     }
 
     if (strcmp(commandBuffer, "LIFTHILL_MOTOR_OFF") == 0) {
-      StopMotor();   // nieuwe functie
+      StopMotor(); 
       sendLog("MOTOR_STOPPED");
     }
+
+    if (strcmp(commandBuffer, "DISPATCH") == 0) {
+      DispatchCoaster(); 
+      sendLog("COASTER_DISPATCHED");
+    }
+
 
   }
 
@@ -190,6 +197,22 @@ void StopMotor() {
   }
 }
 
+bool DispatchCoaster() {
+  while(digitalRead(hallSensorExitStation) == HIGH) {
+    stationStepper.step(1); 
+  }
+  Serial.println("hallSensorExitStation detected, doing extra steps to make sure its off station");
+  ExtraStationSteps();
+  hallSensorExitStationState = true;
+  
+  
+  return true;
+}
+
+void ExtraStationSteps(){
+  stationStepper.step(50);
+  Serial.println("Coaster dispatched");
+}
 
 void sendLog(const char* message) {
   struct_message msg;
