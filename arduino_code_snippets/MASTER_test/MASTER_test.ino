@@ -3,6 +3,7 @@
 #include "Message.h"
 
 uint8_t tiltdropSlave[] = {0xF8, 0xB3, 0xB7, 0x33, 0x23, 0x00};  // Vervang door *jouw* SLAVE MAC
+uint8_t stationSlave[] = {0xF8, 0XB3, 0xB7, 0x33, 0x41, 0xFC};
 
 volatile bool newDataAvailable = false;
 struct_message latestIncoming;
@@ -10,6 +11,19 @@ struct_message latestIncoming;
 void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   memcpy(&latestIncoming, data, sizeof(latestIncoming));
   newDataAvailable = true;  // Flag dat er nieuwe data is
+}
+
+bool waitForResponse(const char* expectedResponse, unsigned long timeout = 3000) {
+  unsigned long start = millis();
+  while (!newDataAvailable && millis() - start < timeout) {
+    delay(50); // minimal CPU-wait
+  }
+
+  if (!newDataAvailable) return false;
+
+  newDataAvailable = false;
+
+  return strcmp(latestIncoming.text, expectedResponse) == 0;
 }
 
 void setup() {
@@ -25,6 +39,7 @@ void setup() {
 
   esp_now_register_recv_cb(OnDataRecv);
 
+  //tiltdropSlave toevoegen
   esp_now_peer_info_t slaveInfo = {};
   memcpy(slaveInfo.peer_addr, tiltdropSlave, 6);
   slaveInfo.channel = 0;
@@ -34,22 +49,53 @@ void setup() {
     esp_now_add_peer(&slaveInfo);
   }
 
+  //stationSlave toevoegen
+  esp_now_peer_info_t stationPeerInfo = {};
+  memcpy(stationPeerInfo.peer_addr, stationSlave, 6);
+  stationPeerInfo.channel = 0;
+  stationPeerInfo.encrypt = false;
+
+  if (!esp_now_is_peer_exist(stationSlave)) {
+    esp_now_add_peer(&stationPeerInfo);
+  }
+
+  sendCommand("PING_TILTDROP", tiltdropSlave);
+  if (waitForResponse("PONG_TILTDROP")) {
+    Serial.println("Tiltdrop slave online");
+  } else {
+    Serial.println("Tiltdrop slave NIET bereikbaar!");
+  }
+
+  sendCommand("PING_STATION", stationSlave);
+  if (waitForResponse("PONG_STATION")) {
+    Serial.println("Station slave online");
+  } else {
+    Serial.println("Station slave NIET bereikbaar!");
+  }
+
+
+
   Serial.println("MASTER klaar.");
 
   delay(1000);  // even wachten voor zekerheid
 
-  Serial.println("PING gestuurd naar SLAVE...");
 }
 
 void loop() {
   delay(5000);
+  WaitForInput('S', "Starting........");
 
+  bool tiltdropStatus = false;
+  while(!tiltdropStatus){
   sendCommand("IS_TILTDROP_CLOSED", tiltdropSlave);
-  TiltdropResponse();
-  //lifthill motor go brrr
+  tiltdropStatus = TiltdropResponse(3);
+  }
+  
 
-  sendCommand("IS_COASTER_ON_TILTDROP", tiltdropSlave);
-  CoasterOnTiltdropResponse();
+  StartAndStopLifthillMotor();
+
+ 
+
 
   sendCommand("DROP", tiltdropSlave);
   DropResponse();
@@ -79,7 +125,60 @@ void sendCommand(const char* commandText, const uint8_t* destinationMAC) {
   }
 }
 
-bool TiltdropResponse() {
+void StartAndStopLifthillMotor(){
+  sendCommand("LIFTHILL_MOTOR_ON", stationSlave);
+  LifthillResponse();
+  
+  sendCommand("IS_COASTER_ON_TILTDROP", tiltdropSlave);
+  if(CoasterOnTiltdropResponse()){
+    sendCommand("LIFTHILL_MOTOR_OFF", stationSlave);
+    LifthillResponse();
+  }
+}
+
+bool TiltdropResponse(int maxRetries) {
+  int retries = 0;
+
+  while (retries < maxRetries) {
+    // Wait for new data, timeout after 3 seconds
+    unsigned long start = millis();
+    while (!newDataAvailable && millis() - start < 3000) {
+      delay(50);  // small delay to avoid hogging CPU
+    }
+    if (!newDataAvailable) {
+      Serial.println("Timeout waiting for response.");
+      return false;
+    }
+
+    Serial.print("Verwerkt ontvangen data: ");
+    Serial.println(latestIncoming.text);
+
+    if (strcmp(latestIncoming.text, "TILTDROP_CLOSED") == 0) {
+      newDataAvailable = false;
+      return true;
+    }
+    else if (strcmp(latestIncoming.text, "TILTDROP_OPEN") == 0) {
+      newDataAvailable = false;
+      Serial.println("Tiltdrop open, retrying...");
+      sendCommand("IS_TILTDROP_CLOSED", tiltdropSlave);
+      retries++;
+      delay(1000);  // brief wait before next try
+      continue;
+    }
+    else {
+      Serial.println("Unexpected response:");
+      Serial.println(latestIncoming.text);
+      newDataAvailable = false;
+      return false;
+    }
+  }
+
+  Serial.println("Max retries reached without TILTDROP_CLOSED.");
+  return false;
+}
+
+
+bool LifthillResponse() {
 
   while(!newDataAvailable){
     Serial.println("wachten op respone");
@@ -89,24 +188,20 @@ bool TiltdropResponse() {
   Serial.print("Verwerkt ontvangen data: ");
   Serial.println(latestIncoming.text);
 
-  if (strcmp(latestIncoming.text, "TILTDROP_CLOSED") == 0) {
-    // bv. update statusvariabele of trigger actie
+  if (strcmp(latestIncoming.text, "MOTOR_RUNNING") == 0) {
+    Serial.println("station motor running");
     newDataAvailable = false;
     return true;
-  }
-  else if (strcmp(latestIncoming.text, "TILTDROP_OPEN") == 0) {
-    // andere actie
-    Serial.println("TODO: wachten en later opnieuw checken");
-  } else {
+  } else if(strcmp(latestIncoming.text, "MOTOR_STOPPED") == 0){
+    Serial.println("station motor stopped");
+    newDataAvailable = false;
+    return false;
+  }else {
     Serial.println("Something went wrong. Please check logs and reset.");
     Serial.println(latestIncoming.text);
     newDataAvailable = false;
     return false;
   }
-  
-  // Data verwerkt, reset flag
-  newDataAvailable = false;
-  return false;
 }
 
 bool CoasterOnTiltdropResponse() {
@@ -133,8 +228,8 @@ bool CoasterOnTiltdropResponse() {
 
 bool DropResponse() {
 while(!newDataAvailable){
-    Serial.println("wachten op respone");
-    delay(200);
+    Serial.println("wachten op response");
+    delay(1000);
   }
 
   Serial.print("Verwerkt ontvangen data: ");
@@ -153,3 +248,19 @@ while(!newDataAvailable){
     }
   }
 
+void WaitForInput(char expectedChar, String succesMessage)
+{
+  expectedChar = toupper(expectedChar);
+
+  while (true) {
+    if (Serial.available() > 0) {
+      char input = Serial.read();
+      input = toupper(input);
+
+      if (input == expectedChar) {
+        Serial.println(succesMessage);
+        break;
+      }
+    }
+  }
+}

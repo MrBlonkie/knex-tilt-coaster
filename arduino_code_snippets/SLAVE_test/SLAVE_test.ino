@@ -26,24 +26,27 @@ struct_message incomingCommand;
 
 // Callback
 void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
-  Serial.print("ESP-NOW callback ontvangen. Lengte = ");
-  Serial.println(len);
+  struct_message incoming;
+  memcpy(&incoming, data, sizeof(incoming));
 
-  Serial.print("Van MAC: ");
-  for (int i = 0; i < 6; i++) {
-    Serial.print(info->src_addr[i], HEX);
-    if (i < 5) Serial.print(":");
+  // PING-pong afhandeling
+  if (strcmp(incoming.text, "PING_TILTDROP") == 0) {
+    sendPong("PONG_TILTDROP");
+    return;  // Geen normale commandoprocessing doen
   }
-  Serial.println();
 
-  if (len == sizeof(incomingCommand)) {
-    memcpy(&incomingCommand, data, sizeof(incomingCommand));
-    Serial.print("Inhoud commandostruct: ");
-    Serial.println(incomingCommand.text);
-    newCommandAvailable = true;
-  } else {
-    Serial.println("⚠️ Ongeldige lengte ontvangen voor commandostruct.");
-  }
+  // Normaal commando opslaan
+  memcpy(&incomingCommand, &incoming, sizeof(incomingCommand));
+  newCommandAvailable = true;
+}
+
+
+void sendPong(const char* responseText) {
+  struct_message response;
+  strncpy(response.text, responseText, sizeof(response.text) - 1);
+  response.text[sizeof(response.text) - 1] = '\0';
+
+  esp_now_send(masterAddress, (uint8_t*)&response, sizeof(response));
 }
 
 bool receiveCommand(char* buffer, size_t bufferSize) {
@@ -65,10 +68,10 @@ void setup() {
   Serial.println(WiFi.macAddress());
 
   if (esp_now_init() != ESP_OK) {
-    Serial.println("❌ ESP-NOW init mislukt!");
+    Serial.println("ESP-NOW init mislukt!");
     return;
   } else {
-    Serial.println("✅ ESP-NOW init geslaagd.");
+    Serial.println("ESP-NOW init geslaagd.");
   }
 
   esp_now_register_recv_cb(OnDataRecv);
@@ -81,9 +84,9 @@ void setup() {
   if (!esp_now_is_peer_exist(masterAddress)) {
     Serial.println("Voeg master toe als peer...");
     if (esp_now_add_peer(&masterInfo) == ESP_OK) {
-      Serial.println("✅ Master toegevoegd als peer.");
+      Serial.println("Master toegevoegd als peer.");
     } else {
-      Serial.println("❌ Fout bij toevoegen van master als peer.");
+      Serial.println("Fout bij toevoegen van master als peer.");
     }
   } else {
     Serial.println("Master al gekend als peer.");
@@ -144,12 +147,12 @@ bool IsTiltdropClosed() {
 
   if (sensorVal == LOW) {
     sendLog("Tiltdrop CLOSED, ready.");
-    Serial.println("✅ Tiltdrop is al gesloten.");
+    Serial.println("Tiltdrop is al gesloten.");
     return true;
   }
 
   sendLog("Tiltdrop NOT CLOSED! Attempting to close.");
-  Serial.println("❗ Tiltdrop is niet gesloten. Beweeg motor...");
+  Serial.println("Tiltdrop is niet gesloten. Beweeg motor...");
 
   for (int i = 0; i < 2048; i++) {
     tiltTrackStepper.step(1);
@@ -157,13 +160,13 @@ bool IsTiltdropClosed() {
     if (digitalRead(hallSensorTiltdropClosed) == LOW) {
       tiltTrackStepper.step(10);
       sendLog("Tiltdrop CLOSED after movement.");
-      Serial.println("✅ Gesloten na beweging.");
+      Serial.println("Gesloten na beweging.");
       return true;
     }
   }
 
   sendLog("ERROR: Could not close Tiltdrop.");
-  Serial.println("❌ ERROR: Kon Tiltdrop niet sluiten na 2048 stappen.");
+  Serial.println("ERROR: Kon Tiltdrop niet sluiten na 2048 stappen.");
   return false;
 }
 
@@ -176,8 +179,6 @@ void EnterTiltdrop()
 
   delay(500);
   Serial.println("coaster ON TILTDROP");
-  delay(500);
-  Serial.println("lifthill sequence stop");
   delay(500);
 
 }

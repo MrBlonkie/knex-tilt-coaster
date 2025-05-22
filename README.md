@@ -4,6 +4,11 @@ TODO:
 - klemmen voor kabels (voeding)
 - zekering? vragen aan MRG
 
+PROGRAM:
+- ping pong bij opstarten met alle ESP's
+- verschillende modi
+- clean up code with .h files
+
 
 aanpak:
 
