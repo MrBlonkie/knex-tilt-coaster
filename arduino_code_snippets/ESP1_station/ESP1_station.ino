@@ -1,7 +1,6 @@
 #include <Stepper.h>
 #include <ESP32Servo.h>
 
-// Hall-sensor pins
 #define hallSensorEnterStation     26
 #define hallSensorStartPosition    25
 #define hallSensorExitStation      33
@@ -27,8 +26,6 @@ Stepper lifthillStepper(stepsPerRevolution, IN1, IN3, IN2, IN4);
 Stepper stationStepper(stepsPerRevolution, IN5, IN7, IN6, IN8);
 
 int lifthillsteps = 0;
-
-TaskHandle_t ExitStationHandle = NULL;
 
 
 void setup() {
@@ -69,7 +66,7 @@ void loop() {
 
   WaitForInput('E', "Coaster is starting");
 
-  NewExitStation();
+  ExitStation();
 
   Serial.println("Coaster dispatched");
   delay(1000);
@@ -109,7 +106,7 @@ void EnterStation()
   }
 }
 
-void NewExitStation() {
+void ExitStation() {
   for (int i = 0; i < 1; i++) {
     stationStepper.step(3000);
   }
@@ -123,31 +120,10 @@ void NewExitStation() {
   Serial.println("Coaster detected at bottom, starting lift...");
 
   while (lifthillsteps < 19000) {
-    lifthillStepper.step(-1); // Pas aan als richting niet klopt
+    lifthillStepper.step(-1); 
     lifthillsteps++;
   }
 
   Serial.println("Coaster reached top of lifthill.");
 }
 
-void ExitStationTask(void *parameter)
-{
-  Serial.println("Waiting for coaster at bottom of lifthill...");
-
-  while (digitalRead(hallSensorBottomLifthill) == HIGH) {
-    Serial.println("coaster NOT ON LIFTHILL");
-  }
-
-  Serial.println("Coaster detected at bottom, starting lift...");
-
-  while (lifthillsteps < 15000) {
-    lifthillStepper.step(-1); // Pas aan als richting niet klopt
-    lifthillsteps++;
-  }
-
-  Serial.println("Coaster reached top of lifthill.");
-
-  // Task beëindigen en handle resetten
-  ExitStationHandle = NULL;
-  vTaskDelete(NULL);
-}

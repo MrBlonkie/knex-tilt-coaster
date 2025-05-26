@@ -29,7 +29,6 @@ void setup() {
 
   tiltTrackStepper.setSpeed(5);
 
-  Serial.println("System ready. Waiting for signal from MASTER ESP.");
 }
 
 void loop() {
