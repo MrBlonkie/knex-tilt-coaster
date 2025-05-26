@@ -141,6 +141,13 @@ void loop() {
 bool IsTiltdropClosed() {
   Serial.println("[Check] IsTiltdropClosed() gestart");
 
+  Serial.println("resetting servo");
+  for(int posDegrees = 90; posDegrees >= 0; posDegrees--) {
+    releaseServo.write(posDegrees);
+    delay(20);
+  }
+  Serial.println("servo reset success");
+
   int sensorVal = digitalRead(hallSensorTiltdropClosed);
   Serial.print("Sensorwaarde hallSensorTiltdropClosed: ");
   Serial.println(sensorVal);
@@ -177,16 +184,17 @@ void EnterTiltdrop()
     Serial.println("coaster NOT on TILTDROP");
   }
 
-  delay(500);
+  delay(100);
   Serial.println("coaster ON TILTDROP");
-  delay(500);
+  delay(100);
 
 }
 
 bool Tiltdrop()
 {
+
   tiltTrackStepper.setSpeed(5);
-  delay(500);
+  delay(50);
   
   for (int i = 0; i < 2048; i++) {
     tiltTrackStepper.step(-1);

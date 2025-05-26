@@ -22,6 +22,7 @@ bool hallSensorExitStationState = false;
 #define IN8 27
 
 const int stepsPerRevolution = 2048;
+const int extraStationSteps = 50;
 
 TaskHandle_t motorTaskHandle = NULL;
 bool lifthillMotorRunning = false;
@@ -112,7 +113,7 @@ void setup() {
   pinMode(hallSensorTopLifthill, INPUT);
 
   lifthillStepper.setSpeed(10);
-  stationStepper.setSpeed(10);
+  stationStepper.setSpeed(12);
 
   Serial.println("SLAVE klaar voor gebruik.\n");
 }
@@ -201,18 +202,14 @@ bool DispatchCoaster() {
   while(digitalRead(hallSensorExitStation) == HIGH) {
     stationStepper.step(1); 
   }
-  Serial.println("hallSensorExitStation detected, doing extra steps to make sure its off station");
-  ExtraStationSteps();
+  Serial.println("Coaster Dispatched!");
   hallSensorExitStationState = true;
-  
-  
+
+
   return true;
 }
 
-void ExtraStationSteps(){
-  stationStepper.step(50);
-  Serial.println("Coaster dispatched");
-}
+
 
 void sendLog(const char* message) {
   struct_message msg;
