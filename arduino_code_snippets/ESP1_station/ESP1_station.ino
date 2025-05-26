@@ -26,6 +26,8 @@ const int stepsPerRevolution = 2048;
 Stepper lifthillStepper(stepsPerRevolution, IN1, IN3, IN2, IN4);
 Stepper stationStepper(stepsPerRevolution, IN5, IN7, IN6, IN8);
 
+int lifthillsteps = 0;
+
 TaskHandle_t ExitStationHandle = NULL;
 
 
@@ -67,23 +69,7 @@ void loop() {
 
   WaitForInput('E', "Coaster is starting");
 
-  // Start ExitStation als thread
-  if (ExitStationHandle == NULL) {
-    xTaskCreatePinnedToCore(
-      ExitStationTask,
-      "ExitStation",
-      10000,
-      NULL,
-      1,
-      &ExitStationHandle,
-      0
-    );
-  }
-
-  // Stationmotor draait coaster uit
-  for (int i = 0; i < 2; i++) {
-    stationStepper.step(stepsPerRevolution);
-  }
+  NewExitStation();
 
   Serial.println("Coaster dispatched");
   delay(1000);
@@ -123,6 +109,26 @@ void EnterStation()
   }
 }
 
+void NewExitStation() {
+  for (int i = 0; i < 1; i++) {
+    stationStepper.step(3000);
+  }
+
+   Serial.println("Waiting for coaster at bottom of lifthill...");
+
+  while (digitalRead(hallSensorBottomLifthill) == HIGH) {
+    Serial.println("coaster NOT ON LIFTHILL");
+  }
+
+  Serial.println("Coaster detected at bottom, starting lift...");
+
+  while (lifthillsteps < 18000) {
+    lifthillStepper.step(-1); // Pas aan als richting niet klopt
+    lifthillsteps++;
+  }
+
+  Serial.println("Coaster reached top of lifthill.");
+}
 
 void ExitStationTask(void *parameter)
 {
@@ -134,8 +140,9 @@ void ExitStationTask(void *parameter)
 
   Serial.println("Coaster detected at bottom, starting lift...");
 
-  while (digitalRead(hallSensorTopLifthill) == LOW) {
+  while (lifthillsteps < 15000) {
     lifthillStepper.step(-1); // Pas aan als richting niet klopt
+    lifthillsteps++;
   }
 
   Serial.println("Coaster reached top of lifthill.");
