@@ -122,7 +122,7 @@ void NewExitStation() {
 
   Serial.println("Coaster detected at bottom, starting lift...");
 
-  while (lifthillsteps < 18000) {
+  while (lifthillsteps < 19000) {
     lifthillStepper.step(-1); // Pas aan als richting niet klopt
     lifthillsteps++;
   }
