@@ -8,6 +8,7 @@ TODO:
 - hallsensor achter drop wordt niet getriggerd
 - flow programma
 - clean up code with .h files
+- andere library voor steppermotor testen (lifthill)
 
 PROGRAM FEATURES:
 - ping pong bij opstarten met alle ESP's
