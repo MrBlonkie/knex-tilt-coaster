@@ -9,9 +9,10 @@ TODO:
 - flow programma
 - clean up code with .h files
 - andere library voor steppermotor testen (lifthill)
+- master moet slaves kunnen hard resetten (fysieke kabel vereist)
 
 PROGRAM FEATURES:
-- ping pong bij opstarten met alle ESP's
+- ping pong bij opstarten met alle ESP's (met resets)
 - verschillende modi
 
 
