@@ -1,4 +1,4 @@
-#define HALL_SENSOR_PIN 23  // The GPIO pin connected to the Hall sensor
+#define HALL_SENSOR_PIN 32  // The GPIO pin connected to the Hall sensor
 
 void setup() {
   Serial.begin(115200);  // Start serial communication
