@@ -4,7 +4,6 @@ TODO:
 - klemmen voor kabels (voeding)
 - zekering? vragen aan MRG
 - sensor states (block zoning)
-- bottomLifthillSensor implementeren
 - hallsensor achter drop wordt niet getriggerd
 - flow programma
 - clean up code with .h files
