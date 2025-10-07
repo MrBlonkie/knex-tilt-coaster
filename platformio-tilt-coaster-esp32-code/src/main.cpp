@@ -20,6 +20,7 @@ Stepper stationStepper(stepsPerRevolution, IN1, IN3, IN2, IN4);
 Stepper lifthillStepper(stepsPerRevolution, IN5, IN7, IN6, IN8);
 
 int lifthillSteps = 0;
+int stationSteps = 0;
 
 
 //hall sensoren
@@ -98,27 +99,17 @@ void handleLifthillMotorStep() {
 }
 
 //auto-control logic
-bool dispatching = false;
+bool coasterDispatched = false;
 
 void handleDispatch() {
-  
-  //DispatchCoaster();
-
+  coasterDispatched = true;
+  server.send(200, "application/json", "{\"dispatch\":\"started\"}");
+  hallSensorEnterStationState = false;
+  hallSensorStartPositionState = false;
+  hallSensorBottomLifthillState = false;
+  hallSensorExitStationState = false;
 }
 
-void DispatchCoaster() {
-  if (!dispatching && digitalRead(hallSensorExitStation) == HIGH) {
-        dispatching = true;
-    }
-    if (dispatching) {
-        stationStepper.step(1);
-        if (digitalRead(hallSensorExitStation) == LOW) {
-            dispatching = false;
-            hallSensorExitStationState = true;
-            Serial.println("Coaster Dispatched!");
-        }
-    }
-}
 
 
 //Auto Control Status handler
@@ -127,7 +118,8 @@ void handleAutoControlStatus() {
   json += "\"hallSensorExitStation\":"; json += (hallSensorExitStationState ? "true" : "false");
   json += "\"hallSensorBottomLifthill\":"; json += (hallSensorBottomLifthillState ? "true" : "false");
   json += "\"hallSensorEnterStation\":"; json += (hallSensorEnterStationState ? "true" : "false");
-  json += "\"hallSensorExitStation\":"; json += (hallSensorExitStationState ? "true" : "false");
+  json += "\"hallSensorStartPosition\":"; json += (hallSensorStartPositionState ? "true" : "false");
+  json += "\"coasterDispatched\":"; json += (coasterDispatched ? "true" : "false");
   json += "}";
 
   server.send(200, "application/json", json);
@@ -202,4 +194,13 @@ void loop() {
   server.handleClient();
   handleStationMotorStep();
   handleLifthillMotorStep();
+
+  if (coasterDispatched) {
+    stationStepper.step(1);
+    if (digitalRead(hallSensorExitStation) == LOW && stationSteps < 200) {
+      hallSensorExitStationState = true;
+      stationSteps++;
+      Serial.println("Coaster Dispatched!");
+    }
+  }
 }
