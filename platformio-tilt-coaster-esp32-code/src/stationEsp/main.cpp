@@ -129,6 +129,12 @@ void handleDispatch() {
   server.send(200, "application/json", "{\"dispatch\":\"started\"}");
 }
 
+//Helper functie motor stop (dit moet op deze manier omdat gewoon een stop() doen met deze library de motor laat uitlopen en niet onmiddelijk stopt)
+void StopStepperMotor(AccelStepper& motor) {
+  motor.setCurrentPosition(motor.currentPosition());
+  motor.moveTo(motor.currentPosition());
+}
+
 // === Auto Logic ===
 void handleCoasterControl() {
   switch (currentState) {
@@ -143,8 +149,7 @@ void handleCoasterControl() {
         stationStepper.run();
         hallSensorStartPositionStateWeb = false;
     if (hallSensorExitStationState) {
-        stationStepper.setCurrentPosition(stationStepper.currentPosition());
-        stationStepper.moveTo(stationStepper.currentPosition());
+        StopStepperMotor(stationStepper);
         setState(STATE_TO_LIFTHILL);
         hallSensorExitStationStateWeb = true;
         Serial.println("[AUTO] Station motor stopped, TO_LIFTHILL");
@@ -196,8 +201,7 @@ void handleCoasterControl() {
       stationStepper.run(); // Voer de beweging uit
       
       if (hallSensorStartPositionState) {
-        stationStepper.setCurrentPosition(stationStepper.currentPosition());
-        stationStepper.moveTo(stationStepper.currentPosition());
+        StopStepperMotor(stationStepper);
         setState(STATE_IDLE);
         coasterDispatched = false;
         hallSensorStartPositionStateWeb = true;
@@ -216,18 +220,6 @@ void handleCoasterControl() {
   //printMotorStatus();
 }
 
-// === Manual Control ===
-void handleManualControl() {
-  if (stationMotorManual) {
-    stationStepper.runSpeed();
-    Serial.println("[MANUAL] Station motor running");
-  }
-  if (liftMotorManual) {
-    liftStepper.runSpeed();
-    Serial.println("[MANUAL] Lift motor running");
-  }
-  //printMotorStatus();
-}
 
 // === /auto-control/status ===
 void handleAutoControlStatus() {
@@ -292,8 +284,8 @@ void setup() {
 
   server.on("/manual/off", []() {
     manualMode = false;
-    stationStepper.stop();
-    liftStepper.stop();
+    StopStepperMotor(stationStepper);
+    StopStepperMotor(liftStepper);
     stationMotorManual = false;
     liftMotorManual = false;
     setState(STATE_IDLE);
@@ -348,10 +340,12 @@ void loop() {
   updateSensors();
 
   if(manualMode){
-    if(stationMotorManual || liftMotorManual){
-      stationStepper.run();
-      liftStepper.run();
-    }
+    if (stationMotorManual) {
+    stationStepper.runSpeed();
+  }
+  if (liftMotorManual) {
+    liftStepper.runSpeed();
+  }
   } else {
     handleCoasterControl();
     stationStepper.run();
