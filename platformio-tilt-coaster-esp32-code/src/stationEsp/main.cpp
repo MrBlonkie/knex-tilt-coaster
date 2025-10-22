@@ -1,10 +1,10 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <AccelStepper.h>
+#include <FastLED.h>
+#include "LedSetup.h"
+#include "../shared/env.h"
 
-// === WiFi Config ===
-const char* ssid = "wieditleestisZOT";
-const char* password = "jemama123";
 
 // === Server ===
 WebServer server(80);
@@ -23,6 +23,13 @@ WebServer server(80);
 AccelStepper stationStepper(AccelStepper::FULL4WIRE, STATION_IN1, STATION_IN3, STATION_IN2, STATION_IN4); 
 AccelStepper liftStepper(AccelStepper::FULL4WIRE, LIFTHILL_IN1, LIFTHILL_IN3, LIFTHILL_IN2, LIFTHILL_IN4);
 
+// === LED Config === 
+#define NUM_LEDS_EXIT 8 
+#define LEDS_EXIT_PIN 21 
+CRGB exitLeds[NUM_LEDS_EXIT];
+uint8_t manualLedBrightness = 128; // variabele voor brightness, 0-255
+unsigned long lastLedUpdate = 0;
+float ledPhase = 0; // fase voor breathing effect
 
 // === Sensors ===
 #define hallSensorExitStation 35
@@ -115,6 +122,7 @@ void updateSensors() {
   }
 }
 
+
 // === Auto Dispatch ===
 void handleDispatch() {
   if (manualMode) {
@@ -164,7 +172,6 @@ void handleCoasterControl() {
         // Dit moet gebeuren net voordat de motor begint te klimmen.
         // De lift zal nu gecontroleerd bewegen met acceleratie/snelheid ingesteld in setup.
         liftStepper.move(-10000); 
-        
         hallSensorBottomLifthillStateWeb = true;
         Serial.println("[AUTO] Lift motor starting CLIMBING (Goal 5000 steps set)");
       }
@@ -250,6 +257,10 @@ void handleStateOnly() {
 void setup() {
   Serial.begin(115200);
 
+  //LED 
+  FastLED.addLeds<NEOPIXEL, LEDS_EXIT_PIN>(exitLeds, NUM_LEDS_EXIT);
+
+  // Sensors
   pinMode(hallSensorExitStation, INPUT_PULLUP);
   pinMode(hallSensorBottomLifthill, INPUT_PULLUP);
   pinMode(hallSensorEnterStation, INPUT_PULLUP);
@@ -339,17 +350,30 @@ void loop() {
   server.handleClient();
   updateSensors();
 
-  if(manualMode){
-    if (stationMotorManual) {
-    stationStepper.runSpeed();
+  if (manualMode) {
+  // Run manual motors
+  if (stationMotorManual) stationStepper.runSpeed();
+  if (liftMotorManual) liftStepper.runSpeed();
+
+  // --- Non-blocking LED effect ---
+  unsigned long now = millis();
+  if (now - lastLedUpdate > 20) { // update elke 20ms
+    lastLedUpdate = now;
+    
+    // Breathing effect
+    ledPhase += 0.05; // snelheid van het effect
+    if (ledPhase > 2 * PI) ledPhase -= 2 * PI;
+    uint8_t brightness = (sin(ledPhase) * 0.5 + 0.5) * manualLedBrightness;
+    
+    for (int i = 0; i < NUM_LEDS_EXIT; i++) {
+      exitLeds[i] = CHSV(160, 255, brightness); // blauw-groen tint
+    }
+    FastLED.show();
   }
-  if (liftMotorManual) {
-    liftStepper.runSpeed();
-  }
-  } else {
-    handleCoasterControl();
-    stationStepper.run();
-    liftStepper.run();
-  }
+} else {
+  handleCoasterControl();
+  stationStepper.run();
+  liftStepper.run();
+}
 }
 
