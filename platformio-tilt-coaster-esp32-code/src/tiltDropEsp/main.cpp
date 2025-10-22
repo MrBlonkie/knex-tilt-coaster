@@ -3,6 +3,7 @@
 #include <AccelStepper.h>
 #include <ESP32Servo.h>
 #include <FastLED.h>
+#include "LedSetup.h"
 #include "../shared/env.h"
 
 // === Server ===
@@ -27,7 +28,7 @@ bool tiltdropMotorMoving = false;
 
 // === LED Config === 
 #define NUM_LEDS_TILT 3 
-#define LEDS_TILT_PIN 21 
+#define LEDS_TILT_PIN 13 
 CRGB tiltLeds[NUM_LEDS_TILT];
 // Non-blocking timing
 unsigned long previousMillis = 0;
@@ -37,6 +38,117 @@ CRGB colors[3] = {CRGB::Red, CRGB::Purple, CRGB::Green};
 int colorIndex[NUM_LEDS_TILT] = {0, 1, 2};
 int brightness[NUM_LEDS_TILT] = {255, 200, 150};
 int step[NUM_LEDS_TILT] = {15, 10, 20}; // stapjes voor fade
+
+// === LED VARIABLES ===
+CRGB currentColor = CRGB::Blue;   // huidige kleur voor fade
+CRGB targetColor = CRGB::Blue;    // kleur waar we naar toe faden
+
+int fadeBrightness = 50;           // puls brightness
+bool fadeIncreasing = true;        // puls richting
+unsigned long lastFadeMillis = 0;
+int fadeInterval = 30;             // snelheid van fade
+
+// === FLASH VARIABLES ===
+unsigned long flashStartMillis = 0;
+int flashCount = 0;
+bool flashing = false;
+
+// === RED PULSE VARIABLES ===
+int redBrightness = 50;
+bool redIncreasing = true;
+
+// === HELPER: SET ALL LEDS ===
+void setAllLeds(CRGB color, int brightnessVal) {
+    for (int i = 0; i < NUM_LEDS_TILT; i++) {
+        tiltLeds[i] = color;
+        tiltLeds[i].nscale8_video(brightnessVal);
+    }
+    FastLED.show();
+}
+
+// === TARGET COLOR FUNCTIE ===
+void SetTargetColor(CRGB newColor) {
+    targetColor = newColor;
+}
+
+// === SMOOTH COLOR FADE + PULSE ===
+void UpdateLedFade() {
+    unsigned long now = millis();
+    if (now - lastFadeMillis < fadeInterval) return;
+    lastFadeMillis = now;
+
+    // Smooth fade currentColor → targetColor
+    currentColor.r = currentColor.r + ((targetColor.r - currentColor.r) / 5);
+    currentColor.g = currentColor.g + ((targetColor.g - currentColor.g) / 5);
+    currentColor.b = currentColor.b + ((targetColor.b - currentColor.b) / 5);
+
+    // Pulsing / fade brightness
+    if (fadeIncreasing) fadeBrightness += 5;
+    else fadeBrightness -= 5;
+    if (fadeBrightness >= 150) fadeIncreasing = false;
+    if (fadeBrightness <= 50) fadeIncreasing = true;
+
+    setAllLeds(currentColor, fadeBrightness);
+}
+
+// === WHITE FLASHES ===
+bool LedWhiteFlash(int numFlashes, int intervalMs) {
+    unsigned long now = millis();
+    if (!flashing) {
+        flashStartMillis = now;
+        flashCount = 0;
+        flashing = true;
+    }
+
+    if (now - flashStartMillis >= intervalMs) {
+        flashStartMillis = now;
+        flashCount++;
+
+        if (flashCount % 2 == 1) setAllLeds(CRGB::White, 255);
+        else setAllLeds(CRGB::Black, 0);
+
+        if (flashCount >= numFlashes * 2) {
+            flashing = false;
+            return true; // klaar
+        }
+    }
+    return false; // nog bezig
+}
+
+// === FAST RED PULSE ===
+void LedRedPulseFast() {
+    unsigned long now = millis();
+    if (now - lastFadeMillis < 30) return;
+    lastFadeMillis = now;
+
+    if (redIncreasing) redBrightness += 20;
+    else redBrightness -= 20;
+    if (redBrightness >= 255) redIncreasing = false;
+    if (redBrightness <= 50) redIncreasing = true;
+
+    setAllLeds(CRGB::Red, redBrightness);
+}
+
+// === MASTER UPDATE LED FUNCTION ===
+void UpdateLeds() {
+    static bool whiteFlashesDone = false;
+
+    if (!tiltdropMotorMoving) {
+        // Motor niet actief → idle blauw
+        whiteFlashesDone = false; // reset flash
+        SetTargetColor(CRGB::Blue);
+        UpdateLedFade();
+    } else {
+        if (!whiteFlashesDone) {
+            whiteFlashesDone = LedWhiteFlash(3, 150); // 3 flashes, 150ms
+        } else {
+            LedRedPulseFast(); // snel rood
+        }
+    }
+}
+
+
+
 
 // === Sensors ===
 #define hallSensorOnTiltdrop 32
@@ -121,30 +233,6 @@ void updateTiltdropSensors()
     }
 }
 
-void LedTiltEffect() {
-  unsigned long currentMillis = millis();
-  if(currentMillis - previousMillis >= effectInterval) {
-    previousMillis = currentMillis;
-
-    for(int i = 0; i < NUM_LEDS_TILT; i++) {
-      // LED faden richting helderste of zwakste waarde
-      tiltLeds[i] = colors[colorIndex[i]];
-      tiltLeds[i].nscale8_video(brightness[i]);
-
-      // Puls / fade effect
-      brightness[i] -= step[i];
-      if(brightness[i] <= 50 || brightness[i] >= 255) {
-        step[i] = -step[i]; // draai richting om
-        // eventueel naar volgende kleur
-        if(step[i] > 0) {
-          colorIndex[i] = (colorIndex[i] + 1) % 3;
-        }
-      }
-    }
-
-    FastLED.show();
-  }
-}
 
 // Helper functie motor stop (dit moet op deze manier omdat gewoon een stop() doen met deze library de motor laat uitlopen en niet onmiddelijk stopt)
 void StopStepperMotor(AccelStepper &motor)
@@ -267,17 +355,19 @@ void setup()
   
 }
 
-void loop()
-{
+void loop() {
     server.handleClient();
     updateTiltdropSensors();
-
+    
+    // Motor beweging
     if (tiltdropMotorMoving) {
-        LedTiltEffect();
         bool stillRunning = tiltTrackStepper.run(); // true zolang de motor nog beweegt
-        if (!stillRunning) {                        // als hij klaar is
-            tiltdropMotorMoving = false;            // beweging stop
+        if (!stillRunning) {
+            tiltdropMotorMoving = false;
             Serial.println("[MANUAL] TILT motor finished movement");
         }
     }
+
+    // LED update
+    UpdateLeds();
 }
