@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "MQTT-platformio-tilt-coaster-esp32-code"
+		},
+		{
+			"name": "platformio-tilt-coaster-esp32-code",
+			"path": "platformio-tilt-coaster-esp32-code"
+		}
+	],
+	"settings": {}
+}
