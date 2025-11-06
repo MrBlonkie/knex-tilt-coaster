@@ -108,9 +108,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
   String message;
   for (int i=0;i<length;i++) message += (char)payload[i];
 
-  if (String(topic) == "station/manual") {
-    manualMode = (message == "on");
+  if (String(topic) == "station/manual" && message == "on") {
     setState(STATE_IDLE);
+    manualMode = true;
+  }
+  else if(String(topic) == "station/manual" && message == "off") {
+    manualMode = false;
   }
   else if (String(topic) == "station/dispatch" && message == "go") {
     if(!manualMode) {
