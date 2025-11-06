@@ -22,6 +22,10 @@ PubSubClient client(espClient);
 
 AccelStepper stationStepper(AccelStepper::FULL4WIRE, STATION_IN1, STATION_IN3, STATION_IN2, STATION_IN4); 
 AccelStepper liftStepper(AccelStepper::FULL4WIRE, LIFTHILL_IN1, LIFTHILL_IN3, LIFTHILL_IN2, LIFTHILL_IN4);
+bool stationStepperState = false;
+bool liftStepperState = false;
+bool stationStepperMoving = false;
+bool liftStepperMoving = false;
 
 // === LED Config === 
 #define NUM_LEDS_EXIT 8 
@@ -118,15 +122,15 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   else if (String(topic) == "station/stationmotor" && message == "on") {
     if(manualMode) {
-      stationMotorManual = true;
       stationStepper.setSpeed(600);
+      stationStepperState = true;
       Serial.println("stationmotor ON through MQTT");
     }
   }
   else if (String(topic) == "station/stationmotor" && message == "off") {
     if(manualMode) {
-      stationMotorManual = false;
       stationStepper.stop();
+      stationStepperState = false;
       Serial.println("stationmotor OFF through MQTT");
     }
   }
@@ -191,7 +195,9 @@ void handleCoasterControl() {
 }
 
 // === Publish Status via MQTT ===
-void publishStatus() {
+String lastStatus = "";
+
+void publishStatusIfChanged() {
   String status = "{";
   status += "\"hallSensorExitStation\":" + String(hallSensorExitStationState ? "true":"false");
   status += ",\"hallSensorBottomLifthill\":" + String(hallSensorBottomLifthillState ? "true":"false");
@@ -200,10 +206,29 @@ void publishStatus() {
   status += ",\"coasterDispatched\":" + String(coasterDispatched ? "true":"false");
   status += ",\"manualMode\":" + String(manualMode ? "true":"false");
   status += ",\"stationMotorManual\":" + String(stationMotorManual ? "true":"false");
+  status += ",\"stationMotorState\":" + String(stationStepperState ? "true":"false");
   status += ",\"liftMotorManual\":" + String(liftMotorManual ? "true":"false");
+  status += ",\"liftMotorState\":" + String(liftStepperState ? "true":"false");
   status += ",\"currentState\":\"" + currentStateName + "\"";
   status += "}";
-  client.publish("station/status", status.c_str());
+  
+  
+  if(status != lastStatus){
+    Serial.println("[STATUS JSON] " + status);
+    client.publish("station/status", status.c_str());
+    lastStatus = status;
+  }
+}
+
+void ledEffect(){
+   unsigned long now = millis();
+  if (now - lastLedUpdate > 20) {
+    lastLedUpdate = now;
+    ledPhase += 0.05; if (ledPhase > 2*PI) ledPhase -= 2*PI;
+    uint8_t brightness = (sin(ledPhase)*0.5 + 0.5) * manualLedBrightness;
+    for(int i=0;i<NUM_LEDS_EXIT;i++) exitLeds[i] = CHSV(160,255,brightness);
+    FastLED.show();
+  }
 }
 
 // === Setup ===
@@ -245,21 +270,13 @@ void loop() {
   updateSensors();
 
   if (manualMode) {
-    if (stationMotorManual) stationStepper.runSpeed();
-    if (liftMotorManual) liftStepper.runSpeed();
+    if (stationStepperState) stationStepper.runSpeed();
+    if (liftStepperState) liftStepper.runSpeed();
   } else handleCoasterControl();
 
   // LED breathing effect
-  unsigned long now = millis();
-  if (now - lastLedUpdate > 20) {
-    lastLedUpdate = now;
-    ledPhase += 0.05; if (ledPhase > 2*PI) ledPhase -= 2*PI;
-    uint8_t brightness = (sin(ledPhase)*0.5 + 0.5) * manualLedBrightness;
-    for(int i=0;i<NUM_LEDS_EXIT;i++) exitLeds[i] = CHSV(160,255,brightness);
-    FastLED.show();
-  }
+  //ledEffect();
 
-  // Status publiceren
-  static unsigned long lastStatus = 0;
-  if (now - lastStatus > 500) { lastStatus = now; publishStatus(); }
+  // Status publish
+  publishStatusIfChanged();
 }
