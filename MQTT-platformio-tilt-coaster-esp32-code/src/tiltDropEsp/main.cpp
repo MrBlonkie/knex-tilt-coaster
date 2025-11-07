@@ -9,6 +9,15 @@
 // === WiFi & MQTT ===
 WiFiClient espClient;
 PubSubClient client(espClient);
+const char *deviceName = "tiltdrop";
+String clientId;
+// De topic voor de connectiviteitsstatus (Heartbeat)
+const char *connectivityTopic = "rollercoaster/tiltdrop/status";
+
+// === Heartbeat Config (NON-BLOCKING) ===
+unsigned long lastHeartbeat = 0;
+// Heartbeat elke 2,5 seconden (voor 4,5s detectie)
+const long heartbeatInterval = 2500; 
 
 // === Tilt-track motor config ===
 #define IN1 18
@@ -25,7 +34,7 @@ bool tiltdropMotorMoving = false;
 Servo releaseServo;
 bool releasedropMotorState = false;
 
-// === LED Config ===
+// === LED Config (Onveranderd) ===
 #define NUM_LEDS_TILT 3
 #define LEDS_TILT_PIN 13
 CRGB tiltLeds[NUM_LEDS_TILT];
@@ -50,7 +59,7 @@ bool flashing = false;
 int redBrightness = 50;
 bool redIncreasing = true;
 
-// === Sensors ===
+// === Sensors (Onveranderd) ===
 #define hallSensorOnTiltdrop 32
 #define hallSensorTiltdropClosed 27
 #define hallSensorTiltdropOpen 34
@@ -61,7 +70,7 @@ bool hallSensorTiltdropClosedState = false;
 bool hallSensorTiltdropOpenState = false;
 bool hallSensorOffTiltdropState = false;
 
-// === STATES ===
+// === STATES (Onveranderd) ===
 enum CoasterState
 {
     STATE_IDLE,
@@ -101,11 +110,11 @@ void setState(CoasterState newState)
     Serial.println("[STATE] → " + currentStateName);
 }
 
-// === State control vars ===
+// === State control vars (Onveranderd) ===
 bool manualMode = false;
 bool tiltdropMotorManual = false;
 
-// === LED HELPERS ===
+// === LED HELPERS (Onveranderd) ===
 void setAllLeds(CRGB color, int brightnessVal)
 {
     for (int i = 0; i < NUM_LEDS_TILT; i++)
@@ -212,7 +221,7 @@ void UpdateLeds()
     }
 }
 
-// === Sensors update ===
+// === Sensors update (Onveranderd) ===
 void updateTiltdropSensors()
 {
     bool onTiltdrop = digitalRead(hallSensorOnTiltdrop) == LOW;
@@ -226,14 +235,14 @@ void updateTiltdropSensors()
     hallSensorOffTiltdropState = offTiltdrop;
 }
 
-// === Helper motor stop ===
+// === Helper motor stop (Onveranderd) ===
 void StopStepperMotor(AccelStepper &motor)
 {
     motor.setCurrentPosition(motor.currentPosition());
     motor.moveTo(motor.currentPosition());
 }
 
-// === MQTT callback ===
+// === MQTT callback (Onveranderd) ===
 void callback(char *topic, byte *payload, unsigned int length)
 {
     String message = "";
@@ -254,7 +263,7 @@ void callback(char *topic, byte *payload, unsigned int length)
             tiltTrackStepper.move(-STEPS_TILT_TRACK);
             tiltdropMotorState = true;
             tiltdropMotorMoving = true;
-            tiltdropMotorManual=true;
+            tiltdropMotorManual = true;
         }
     }
     else if (String(topic) == "tiltdrop/tiltdropmotor" && message == "close")
@@ -264,13 +273,14 @@ void callback(char *topic, byte *payload, unsigned int length)
             tiltTrackStepper.move(STEPS_TILT_TRACK);
             tiltdropMotorState = false;
             tiltdropMotorMoving = true;
-            tiltdropMotorManual=true;
+            tiltdropMotorManual = true;
         }
     }
     else if (String(topic) == "tiltdrop/releasedropmotor" && message == "open")
     {
         if (manualMode)
         {
+            // Servo blocking code—NOTE: This should be non-blocking in a final version!
             for (int pos = 90; pos >= 0; pos--)
                 releaseServo.write(pos);
             releasedropMotorState = true;
@@ -280,6 +290,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
         if (manualMode)
         {
+            // Servo blocking code—NOTE: This should be non-blocking in a final version!
             for (int pos = 0; pos <= 90; pos++)
                 releaseServo.write(pos);
             releasedropMotorState = false;
@@ -287,15 +298,24 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
 }
 
-// === MQTT connect ===
+// === MQTT connect ZONDER LWT ===
 void connectMQTT()
 {
+    // Gebruik de clientId die eerder is gedefinieerd
+    clientId = "roller-" + String(deviceName) + "-" + String((uint32_t)ESP.getEfuseMac());
+
     while (!client.connected())
     {
         Serial.print("Connecting MQTT...");
-        if (client.connect("tiltdropESP32"))
+        // client.connect() zonder LWT parameters
+        if (client.connect(clientId.c_str()))
         {
             Serial.println("connected");
+            
+            // Publiceer de initiële Heartbeat status (retained)
+            client.publish(connectivityTopic, "online", true);
+
+            // Subscribe naar control topics
             client.subscribe("tiltdrop/manual");
             client.subscribe("tiltdrop/tiltdropmotor");
             client.subscribe("tiltdrop/releasedropmotor");
@@ -309,7 +329,19 @@ void connectMQTT()
     }
 }
 
-// === Publish Status via MQTT ===
+// === Publish Heartbeat via MQTT (NON-BLOCKING) ===
+void publishHeartbeat() {
+  // Controleer of de intervaltijd verstreken is sinds de laatste Heartbeat
+  if (millis() - lastHeartbeat >= heartbeatInterval) {
+    lastHeartbeat = millis();
+    
+    // Heartbeat: stuur "online" status met Retain naar het specifieke topic.
+    client.publish(connectivityTopic, "online", true); 
+    // Serial.println("[HB] Heartbeat sent: online"); // Uncomment voor debug
+  }
+}
+
+// === Publish Status via MQTT (Onveranderd) ===
 String lastStatus = "";
 
 void publishStatusIfChanged()
@@ -328,7 +360,7 @@ void publishStatusIfChanged()
     if (status != lastStatus)
     {
         Serial.println("[STATUS JSON] " + status);
-        client.publish("tiltdrop/status", status.c_str());
+        client.publish("tiltdrop/status", status.c_str(), true);
         lastStatus = status;
     }
 }
@@ -351,6 +383,8 @@ void setup()
     // MQTT
     client.setServer(mqtt_server, mqtt_port);
     client.setCallback(callback);
+    
+    // De eerste connectie wordt nu hier gedaan (zonder LWT), en de Heartbeat wordt direct verstuurd
     connectMQTT();
 
     // LEDs
@@ -380,7 +414,9 @@ void loop()
     client.loop();
 
     updateTiltdropSensors();
-
+    
+    // NON-BLOCKING Heartbeat toegevoegd
+    publishHeartbeat();
 
     if (tiltdropMotorMoving)
     {
