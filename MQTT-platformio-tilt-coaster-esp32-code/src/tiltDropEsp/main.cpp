@@ -24,10 +24,32 @@ const long heartbeatInterval = 2500;
 #define IN2 19
 #define IN3 22
 #define IN4 23
-#define STEPS_TILT_TRACK 550
 AccelStepper tiltTrackStepper(AccelStepper::FULL4WIRE, IN1, IN3, IN2, IN4);
-bool tiltdropMotorState = false;
+
+// === NIEUWE MOTOR CONFIG ===
+// Drempels (deze moet je in de praktijk afstellen)
+#define STEPS_UNTIL_SLOWDOWN 400 // Na hoeveel stappen vanaf start gaan we vertragen? (Totaal = 550)
+#define STEPS_OVERRUN 40         // Hoeveel stappen extra na raken van sensor?
+
+// Snelheden
+#define MOTOR_SPEED_FAST 500.0
+#define MOTOR_SPEED_SLOW 100.0
+
+// State machine voor de motor
+enum MotorRunState
+{
+    IDLE,
+    SEEKING,
+    OVERRUN
+};
+MotorRunState motorRunState = IDLE;
+long motorReferencePosition = 0; // Om stappen te tellen voor slowdown
+bool motorInSlowZone = false;  // Om te onthouden dat we al vertraagd zijn
+// === EINDE NIEUWE MOTOR CONFIG ===
+
+bool tiltdropMotorState = false; // true = richting 'open', false = richting 'dicht'
 bool tiltdropMotorMoving = false;
+bool isTiltdropTrackOpen = false; // Wordt nu correct bijgewerkt door sensoren
 
 // === Servo config ===
 #define SERVO_PIN 25
@@ -60,10 +82,10 @@ int redBrightness = 50;
 bool redIncreasing = true;
 
 // === Sensors (Onveranderd) ===
-#define hallSensorOnTiltdrop 32
-#define hallSensorTiltdropClosed 27
-#define hallSensorTiltdropOpen 34
-#define hallSensorOffTiltdrop 26
+#define hallSensorOnTiltdrop 34
+#define hallSensorTiltdropClosed 26
+#define hallSensorTiltdropOpen 32
+#define hallSensorOffTiltdrop 27
 
 bool hallSensorOnTiltdropState = false;
 bool hallSensorTiltdropClosedState = false;
@@ -229,6 +251,7 @@ void updateTiltdropSensors()
     bool tiltdropOpen = digitalRead(hallSensorTiltdropOpen) == LOW;
     bool offTiltdrop = digitalRead(hallSensorOffTiltdrop) == LOW;
 
+    // Update de globale state variabelen
     hallSensorOnTiltdropState = onTiltdrop;
     hallSensorTiltdropClosedState = tiltdropClosed;
     hallSensorTiltdropOpenState = tiltdropOpen;
@@ -236,13 +259,14 @@ void updateTiltdropSensors()
 }
 
 // === Helper motor stop (Onveranderd) ===
+// Deze functie is nu cruciaal
 void StopStepperMotor(AccelStepper &motor)
 {
-    motor.setCurrentPosition(motor.currentPosition());
-    motor.moveTo(motor.currentPosition());
+    motor.setCurrentPosition(motor.currentPosition()); // Reset 'huidige' positie
+    motor.moveTo(motor.currentPosition()); // Vertel de motor om naar de huidige positie te gaan (dus: stop)
 }
 
-// === MQTT callback (Onveranderd) ===
+// === MQTT callback (AANGEPAST) ===
 void callback(char *topic, byte *payload, unsigned int length)
 {
     String message = "";
@@ -256,26 +280,78 @@ void callback(char *topic, byte *payload, unsigned int length)
         if (!manualMode)
             tiltdropMotorManual = false;
     }
+    // --- BEGIN AANPASSING ---
     else if (String(topic) == "tiltdrop/tiltdropmotor" && message == "open")
     {
         if (manualMode)
         {
-            tiltTrackStepper.move(-STEPS_TILT_TRACK);
-            tiltdropMotorState = true;
+            // Controleer of we niet al open zijn
+            if (hallSensorTiltdropOpenState)
+            {
+                Serial.println("[MANUAL] Motor is al open.");
+                return; // Doe niets
+            }
+            // Vertel de motor om een (bijna) oneindig aantal stappen 'open' (negatief) te zetten
+            tiltTrackStepper.move(-9999999);
+            tiltTrackStepper.setMaxSpeed(MOTOR_SPEED_FAST); // Start op volle snelheid
+            
+            tiltdropMotorState = true; // true = we zijn aan het openen
             tiltdropMotorMoving = true;
             tiltdropMotorManual = true;
+            
+            // Stel de state machine in
+            motorReferencePosition = tiltTrackStepper.currentPosition(); // Onthoud startpositie
+            motorRunState = SEEKING;
+            motorInSlowZone = false; // We zijn nog niet in de slow zone
+            
+            Serial.println("[MANUAL] Start motor: OPENEN (SEEKING)");
         }
     }
     else if (String(topic) == "tiltdrop/tiltdropmotor" && message == "close")
     {
         if (manualMode)
         {
-            tiltTrackStepper.move(STEPS_TILT_TRACK);
-            tiltdropMotorState = false;
+            // Controleer of we niet al dicht zijn
+            if (hallSensorTiltdropClosedState)
+            {
+                Serial.println("[MANUAL] Motor is al dicht.");
+                return; // Doe niets
+            }
+            // Vertel de motor om een (bijna) oneindig aantal stappen 'dicht' (positief) te zetten
+            tiltTrackStepper.move(9999999);
+            tiltTrackStepper.setMaxSpeed(MOTOR_SPEED_FAST); // Start op volle snelheid
+
+            tiltdropMotorState = false; // false = we zijn aan het sluiten
             tiltdropMotorMoving = true;
             tiltdropMotorManual = true;
+
+            // Stel de state machine in
+            motorReferencePosition = tiltTrackStepper.currentPosition(); // Onthoud startpositie
+            motorRunState = SEEKING;
+            motorInSlowZone = false; // We zijn nog niet in de slow zone
+
+            Serial.println("[MANUAL] Start motor: SLUITEN (SEEKING)");
         }
     }
+    else if (String(topic) == "tiltdrop/tiltdropmotor" && message == "close")
+    {
+        if (manualMode)
+        {
+            // Controleer of we niet al dicht zijn
+            if (hallSensorTiltdropClosedState) {
+                Serial.println("[MANUAL] Motor is al dicht.");
+                return; // Doe niets
+            }
+            // Vertel de motor om een (bijna) oneindig aantal stappen 'dicht' (positief) te zetten
+            tiltTrackStepper.move(9999999);
+            tiltdropMotorState = false; // false = we zijn aan het sluiten
+            tiltdropMotorMoving = true;
+            tiltdropMotorManual = true;
+            // isTiltdropTrackOpen = false; // NIET MEER HIER
+            Serial.println("[MANUAL] Start motor: SLUITEN");
+        }
+    }
+    // --- EINDE AANPASSING ---
     else if (String(topic) == "tiltdrop/releasedropmotor" && message == "open")
     {
         if (manualMode)
@@ -331,14 +407,14 @@ void connectMQTT()
 
 // === Publish Heartbeat via MQTT (NON-BLOCKING) ===
 void publishHeartbeat() {
-  // Controleer of de intervaltijd verstreken is sinds de laatste Heartbeat
-  if (millis() - lastHeartbeat >= heartbeatInterval) {
-    lastHeartbeat = millis();
-    
-    // Heartbeat: stuur "online" status met Retain naar het specifieke topic.
-    client.publish(connectivityTopic, "online", true); 
-    // Serial.println("[HB] Heartbeat sent: online"); // Uncomment voor debug
-  }
+    // Controleer of de intervaltijd verstreken is sinds de laatste Heartbeat
+    if (millis() - lastHeartbeat >= heartbeatInterval) {
+        lastHeartbeat = millis();
+        
+        // Heartbeat: stuur "online" status met Retain naar het specifieke topic.
+        client.publish(connectivityTopic, "online", true); 
+        // Serial.println("[HB] Heartbeat sent: online"); // Uncomment voor debug
+    }
 }
 
 // === Publish Status via MQTT (Onveranderd) ===
@@ -352,6 +428,7 @@ void publishStatusIfChanged()
     status += ",\"hallSensorTiltdropOpen\":" + String(hallSensorTiltdropOpenState ? "true" : "false");
     status += ",\"hallSensorOffTiltdrop\":" + String(hallSensorOffTiltdropState ? "true" : "false");
     status += ",\"tiltdropMotorMoving\":" + String(tiltdropMotorMoving ? "true" : "false");
+    status += ",\"isTiltdropTrackOpen\":" + String(isTiltdropTrackOpen ? "true" : "false"); // Deze is nu veel accurater
     status += ",\"manualMode\":" + String(manualMode ? "true" : "false");
     status += ",\"releasedropMotorState\":" + String(releasedropMotorState ? "true" : "false");
     status += ",\"currentState\":\"" + currentStateName + "\"";
@@ -397,11 +474,23 @@ void setup()
     pinMode(hallSensorOffTiltdrop, INPUT_PULLUP);
 
     // Motor
-    tiltTrackStepper.setMaxSpeed(500.0);
+    tiltTrackStepper.setMaxSpeed(MOTOR_SPEED_FAST); // Gebruik de nieuwe define
     tiltTrackStepper.setAcceleration(200.0);
 
     // Servo
     releaseServo.attach(SERVO_PIN);
+
+    // Bepaal de initiële staat van de track
+    updateTiltdropSensors();
+    if (hallSensorTiltdropOpenState) {
+        isTiltdropTrackOpen = true;
+    } else if (hallSensorTiltdropClosedState) {
+        isTiltdropTrackOpen = false;
+    } else {
+        // Onbekende staat, ga uit van dicht
+        isTiltdropTrackOpen = false; 
+        Serial.println("[INIT] Waarschuwing: Tiltdrop positie onbekend, ga uit van 'dicht'.");
+    }
 
     setState(STATE_IDLE);
 }
@@ -414,19 +503,78 @@ void loop()
     client.loop();
 
     updateTiltdropSensors();
-    
+
     // NON-BLOCKING Heartbeat toegevoegd
     publishHeartbeat();
 
+    // --- BEGIN AANPASSING: State Machine voor Motor Control ---
     if (tiltdropMotorMoving)
     {
+        // 1. Voer altijd een stap uit (indien nodig)
         bool stillRunning = tiltTrackStepper.run();
-        if (!stillRunning)
+
+        // 2. Bepaal welke sensor we zoeken
+        bool targetSensorHit = (tiltdropMotorState == true) ? hallSensorTiltdropOpenState : hallSensorTiltdropClosedState;
+
+        // === STATE: SEEKING (Op zoek naar sensor) ===
+        if (motorRunState == SEEKING)
         {
-            tiltdropMotorMoving = false;
-            Serial.println("[MANUAL] Tilt motor movement finished");
+            if (targetSensorHit)
+            {
+                // Sensor geraakt! Start de 'OVERRUN'
+                Serial.println("[MOTOR] Sensor hit. Starting OVERRUN.");
+                motorRunState = OVERRUN;
+
+                // Bepaal de extra stappen
+                long overrunSteps = (tiltdropMotorState == true) ? -STEPS_OVERRUN : STEPS_OVERRUN;
+                
+                // Belangrijk: stel een *nieuw* relatief doel in
+                // moveTo() zou het oude '9999999'-doel overschrijven, maar
+                // move() telt op bij het huidige doel, wat we ook niet willen.
+                // We stellen de huidige positie en gaan vanaf daar 'move'.
+                tiltTrackStepper.setCurrentPosition(0); // Reset positie-teller
+                tiltTrackStepper.move(overrunSteps);    // Stel nieuw, klein doel in
+
+                tiltTrackStepper.setMaxSpeed(MOTOR_SPEED_SLOW); // Overrun altijd langzaam
+            }
+            else if (!motorInSlowZone)
+            {
+                // We zijn nog 'fast' en de sensor is nog niet geraakt.
+                // Controleren of we moeten vertragen?
+                long stepsMoved = abs(tiltTrackStepper.currentPosition() - motorReferencePosition);
+                if (stepsMoved > STEPS_UNTIL_SLOWDOWN)
+                {
+                    motorInSlowZone = true;
+                    tiltTrackStepper.setMaxSpeed(MOTOR_SPEED_SLOW);
+                    Serial.println("[MOTOR] Entering slow zone.");
+                }
+            }
+            else if (!stillRunning)
+            {
+                // Failsafe: De motor is gestopt omdat hij zijn (enorme) doel
+                // heeft bereikt, wat niet zou mogen gebeuren.
+                tiltdropMotorMoving = false;
+                motorRunState = IDLE;
+                Serial.println("[MOTOR] Tilt motor gestopt (FAILSAFE: stappenlimiet bereikt).");
+            }
+        }
+        // === STATE: OVERRUN (Bezig met laatste stappen) ===
+        else if (motorRunState == OVERRUN)
+        {
+            if (!stillRunning)
+            {
+                // De 'overrun' stappen zijn voltooid. Nu echt stoppen.
+                Serial.println("[MOTOR] Overrun complete. Final position reached.");
+                tiltdropMotorMoving = false;
+                motorRunState = IDLE;
+                
+                // Update de definitieve status
+                isTiltdropTrackOpen = tiltdropMotorState; // true als we openden, false als we sloten
+            }
+            // else: doe niets, laat 'run()' zijn werk doen.
         }
     }
+    // --- EINDE AANPASSING ---
 
     UpdateLeds();
 
