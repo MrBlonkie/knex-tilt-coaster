@@ -18,19 +18,21 @@ unsigned long lastHeartbeat = 0;
 const long heartbeatInterval = 2500; // 10 seconden
 
 // === Motor Config ===
+// station
 #define STATION_IN1 18
 #define STATION_IN2 19
 #define STATION_IN3 22
 #define STATION_IN4 23
 
-#define LIFTHILL_IN1 13
-#define LIFTHILL_IN2 12
-#define LIFTHILL_IN3 14
-#define LIFTHILL_IN4 27
-
 AccelStepper stationStepper(AccelStepper::FULL4WIRE, STATION_IN1, STATION_IN3, STATION_IN2, STATION_IN4);
-AccelStepper liftStepper(AccelStepper::FULL4WIRE, LIFTHILL_IN1, LIFTHILL_IN3, LIFTHILL_IN2, LIFTHILL_IN4);
 bool stationStepperState = false;
+
+// lifthill
+#define LIFT_DIR_PIN 26
+#define LIFT_STEP_PIN 27
+#define LIFT_ENABLE_PIN 14
+
+AccelStepper liftStepper(AccelStepper::DRIVER, LIFT_STEP_PIN, LIFT_DIR_PIN);
 bool liftStepperState = false;
 
 // === Sensors ===
@@ -136,7 +138,18 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
   else if (String(topic) == "station/lifthillmotor" && manualMode)
   {
-    liftMotorManual = (message == "on");
+    if (message == "on")
+    {
+      digitalWrite(LIFT_ENABLE_PIN, LOW);
+      liftStepper.setSpeed(600);
+      liftStepperState = true;
+    }
+    else
+    {
+      liftStepper.stop();
+      digitalWrite(LIFT_ENABLE_PIN, HIGH);
+      liftStepperState = false;
+    }
   }
   else if (String(topic) == "rollercoaster/control/auto")
   {
@@ -343,9 +356,14 @@ void setup()
   // Motors
   stationStepper.setMaxSpeed(800.0);
   stationStepper.setAcceleration(300.0);
-  liftStepper.setMaxSpeed(1000.0);
+
+  liftStepper.setMaxSpeed(800.0);
   liftStepper.setAcceleration(400.0);
 
+  pinMode(LIFT_ENABLE_PIN, OUTPUT);
+  digitalWrite(LIFT_ENABLE_PIN, HIGH);
+
+  // States
   setState(STATE_IDLE);
 }
 

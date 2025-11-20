@@ -4,7 +4,7 @@
 #include <ESP32Servo.h>
 #include <FastLED.h>
 #include "LedSetup.h"
-#include "../shared/env.h" // ssid, password, mqtt_server, mqtt_port
+#include "../shared/env.h" // ssid, password, mqtt_server, mqtt_portt
 
 // === WiFi & MQTT ===
 WiFiClient espClient;
@@ -31,7 +31,7 @@ AccelStepper tiltTrackStepper(AccelStepper::FULL4WIRE, IN1, IN3, IN2, IN4);
 #define STEPS_OVERRUN 40         // Hoeveel stappen extra na raken van sensor?
 
 // Snelheden
-#define MOTOR_SPEED_FAST 500.0
+#define MOTOR_SPEED_FAST 450.0
 #define MOTOR_SPEED_SLOW 100.0
 
 // State machine voor de motor
