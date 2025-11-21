@@ -103,6 +103,14 @@ bool manualMode = false;
 bool stationMotorManual = false;
 bool liftMotorManual = false;
 
+// === Helper motor stop ===
+void StopStepperMotor(AccelStepper &motor)
+{
+  motor.stop();
+  motor.setCurrentPosition(motor.currentPosition());
+  motor.moveTo(motor.currentPosition());
+}
+
 // === MQTT callback ===
 void callback(char *topic, byte *payload, unsigned int length)
 {
@@ -117,8 +125,8 @@ void callback(char *topic, byte *payload, unsigned int length)
   else if (String(topic) == "station/manual" && message == "off")
   {
     manualMode = false;
-    stationStepper.stop();
-    liftStepper.stop();
+    StopStepperMotor(stationStepper);
+    StopStepperMotor(liftStepper);
     stationStepperState = false;
     liftStepperState = false;
   }
@@ -136,7 +144,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     else
     {
-      stationStepper.stop();
+      StopStepperMotor(stationStepper);
       stationStepperState = false;
     }
   }
@@ -150,7 +158,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     else
     {
-      liftStepper.stop();
+      StopStepperMotor(liftStepper);
       digitalWrite(LIFT_ENABLE_PIN, HIGH);
       liftStepperState = false;
     }
@@ -218,14 +226,6 @@ void connectMQTT()
       delay(2000);
     }
   }
-}
-
-// === Helper motor stop ===
-void StopStepperMotor(AccelStepper &motor)
-{
-  motor.stop();
-  motor.setCurrentPosition(motor.currentPosition());
-  motor.moveTo(motor.currentPosition());
 }
 
 // === Sensors update ===
@@ -412,9 +412,10 @@ void loop()
   if (!manualMode)
   {
     handleAutoControl();
+    stationStepper.runSpeed();
+    liftStepper.runSpeed();
+
   }
-  stationStepper.run();
-  liftStepper.run();
 
   if (stationStepperState)
   {
