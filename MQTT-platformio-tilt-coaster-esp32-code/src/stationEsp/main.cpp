@@ -35,6 +35,10 @@ bool stationStepperState = false;
 AccelStepper liftStepper(AccelStepper::DRIVER, LIFT_STEP_PIN, LIFT_DIR_PIN);
 bool liftStepperState = false;
 
+// fan
+#define RELAY_PIN 12
+bool relayState = false;
+
 // === Sensors ===
 #define hallSensorExitStation 35
 #define hallSensorBottomLifthill 33
@@ -151,6 +155,19 @@ void callback(char *topic, byte *payload, unsigned int length)
       liftStepperState = false;
     }
   }
+  else if (String(topic) == "station/stationfan" && manualMode)
+  {
+    if (message == "on")
+    {
+      digitalWrite(RELAY_PIN, HIGH);
+      relayState = true;
+    }
+    else
+    {
+      digitalWrite(RELAY_PIN, LOW);
+      relayState = false;
+    }
+  }
   else if (String(topic) == "rollercoaster/control/auto")
   {
     if (message == "on")
@@ -188,6 +205,7 @@ void connectMQTT()
       client.subscribe("station/dispatch");
       client.subscribe("station/stationmotor");
       client.subscribe("station/lifthillmotor");
+      client.subscribe("station/stationfan");
       client.subscribe("rollercoaster/control/auto");
       client.subscribe("rollercoaster/event");
       client.subscribe("rollercoaster/dispatch");
@@ -313,6 +331,7 @@ void publishStatusIfChanged()
   status += ",\"stationMotorState\":" + String(stationStepperState ? "true" : "false");
   status += ",\"liftMotorManual\":" + String(liftMotorManual ? "true" : "false");
   status += ",\"liftMotorState\":" + String(liftStepperState ? "true" : "false");
+  status += ",\"relayState\":" + String(relayState ? "true" : "false");
   status += ",\"currentState\":\"" + currentStateName + "\"";
   status += "}";
 
@@ -362,6 +381,8 @@ void setup()
 
   pinMode(LIFT_ENABLE_PIN, OUTPUT);
   digitalWrite(LIFT_ENABLE_PIN, HIGH);
+
+  pinMode(RELAY_PIN, OUTPUT);
 
   // States
   setState(STATE_IDLE);
