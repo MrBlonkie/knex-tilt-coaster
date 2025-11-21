@@ -187,7 +187,11 @@ void callback(char *topic, byte *payload, unsigned int length)
   {
     if (message == "train_on_tiltdrop")
     {
-      trainOnTiltdrop = true; // <-- zet flag
+      trainOnTiltdrop = true;
+    }
+    if(message == "tiltdrop_closed")
+    {
+      trainOnTiltdrop = false;
     }
   }
 }
@@ -247,17 +251,18 @@ void handleAutoControl()
     if (coasterDispatched)
     {
       coasterDispatched = false;
-      stationStepper.move(10000);
+      stationStepper.setSpeed(600);
+      stationStepperState = true;
       setState(STATE_DISPATCHING);
       client.publish("rollercoaster/event", "train_dispatched");
     }
     break;
 
   case STATE_DISPATCHING:
-    stationStepper.run();
     if (hallSensorExitStationState)
     {
       StopStepperMotor(stationStepper);
+      stationStepperState = false;
       setState(STATE_TO_LIFTHILL);
       client.publish("rollercoaster/event", "train_left_station");
     }
@@ -267,7 +272,11 @@ void handleAutoControl()
     if (hallSensorBottomLifthillState)
     {
       client.publish("rollercoaster/event", "train_on_lifthill");
-      // lifthill stepper logic
+      digitalWrite(RELAY_PIN, HIGH);
+      relayState = true;
+      digitalWrite(LIFT_ENABLE_PIN, LOW);
+      liftStepper.setSpeed(600);
+      liftStepperState = true;
       setState(STATE_CLIMBING);
     }
     break;
@@ -276,7 +285,11 @@ void handleAutoControl()
     if (trainOnTiltdrop)
     {
       trainOnTiltdrop = false;
-      //StopStepperMotor(liftStepper);
+      StopStepperMotor(liftStepper);
+      digitalWrite(RELAY_PIN, LOW);
+      relayState = false;
+      digitalWrite(LIFT_ENABLE_PIN, HIGH);
+      liftStepperState = false;
       client.publish("rollercoaster/event", "train_on_tiltdrop");
       setState(STATE_RIDING);
     }
@@ -291,10 +304,12 @@ void handleAutoControl()
     break;
 
   case STATE_ENTER_STATION:
-    stationStepper.move(10000);
+    stationStepper.setSpeed(600);
+    stationStepperState = true;
     if (hallSensorStartPositionState)
     {
       StopStepperMotor(stationStepper);
+      stationStepperState = false;
       client.publish("rollercoaster/event", "train_in_start_position");
       setState(STATE_IDLE);
     }
