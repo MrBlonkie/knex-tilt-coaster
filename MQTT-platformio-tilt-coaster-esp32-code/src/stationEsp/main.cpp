@@ -187,7 +187,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   {
     if (message == "train_on_tiltdrop")
     {
-      trainOnTiltdrop = true;
+      trainOnTiltdrop = true; // <-- zet flag
     }
     if(message == "tiltdrop_closed")
     {
@@ -247,22 +247,24 @@ void handleAutoControl()
   switch (currentState)
   {
   case STATE_IDLE:
-    // Simuleer dispatch start
+    // Wacht op dispatch commando
     if (coasterDispatched)
     {
       coasterDispatched = false;
-      stationStepper.setSpeed(600);
-      stationStepperState = true;
+      // SET TARGET EENMALIG HIER
+      stationStepper.move(10000); 
       setState(STATE_DISPATCHING);
       client.publish("rollercoaster/event", "train_dispatched");
     }
     break;
 
   case STATE_DISPATCHING:
+    // Hier alleen runnen
+    stationStepper.run(); 
+    
     if (hallSensorExitStationState)
     {
       StopStepperMotor(stationStepper);
-      stationStepperState = false;
       setState(STATE_TO_LIFTHILL);
       client.publish("rollercoaster/event", "train_left_station");
     }
@@ -272,23 +274,27 @@ void handleAutoControl()
     if (hallSensorBottomLifthillState)
     {
       client.publish("rollercoaster/event", "train_on_lifthill");
+      digitalWrite(LIFT_ENABLE_PIN, LOW);
       digitalWrite(RELAY_PIN, HIGH);
       relayState = true;
-      digitalWrite(LIFT_ENABLE_PIN, LOW);
-      liftStepper.setSpeed(600);
+      
+      liftStepper.setSpeed(600); // Snelheid zetten
       liftStepperState = true;
       setState(STATE_CLIMBING);
     }
     break;
 
   case STATE_CLIMBING:
+    // BELANGRIJK: De lift moet hier stappen maken!
+    liftStepper.runSpeed(); 
+
     if (trainOnTiltdrop)
     {
       trainOnTiltdrop = false;
       StopStepperMotor(liftStepper);
-      digitalWrite(RELAY_PIN, LOW);
-      relayState = false;
       digitalWrite(LIFT_ENABLE_PIN, HIGH);
+      digitalWrite(RELAY_PIN, LOW); // Let op: stond in je oude code ook op HIGH (fan uit?)
+      relayState = false;
       liftStepperState = false;
       client.publish("rollercoaster/event", "train_on_tiltdrop");
       setState(STATE_RIDING);
@@ -299,21 +305,27 @@ void handleAutoControl()
     if (hallSensorEnterStationState)
     {
       client.publish("rollercoaster/event", "train_enters_station");
+      // TARGET EENMALIG ZETTEN VOOR DE VOLGENDE FASE
+      stationStepper.move(10000); 
       setState(STATE_ENTER_STATION);
     }
     break;
 
   case STATE_ENTER_STATION:
-    stationStepper.setSpeed(600);
-    stationStepperState = true;
+    // Hier alleen runnen
+    stationStepper.run();
+
     if (hallSensorStartPositionState)
     {
       StopStepperMotor(stationStepper);
-      stationStepperState = false;
       client.publish("rollercoaster/event", "train_in_start_position");
       setState(STATE_IDLE);
     }
     break;
+    
+  case STATE_ERROR:
+      // Veiligheid
+      break;
   }
 }
 
@@ -406,32 +418,32 @@ void setup()
 // === Loop ===
 void loop()
 {
-  // Dit moet altijd draaien
   if (!client.connected())
     connectMQTT();
   client.loop();
 
   updateSensors();
-
-  // NON-BLOCKING Heartbeat
   publishHeartbeat();
 
   if (manualMode)
   {
+    // Handmatige bediening
     if (stationStepperState)
       stationStepper.runSpeed();
     if (liftStepperState)
       liftStepper.runSpeed();
   }
-
-  if (!manualMode)
+  else
   {
+    // Automatische bediening
     handleAutoControl();
-    stationStepper.runSpeed();
-    liftStepper.runSpeed();
-
   }
 
+  // === VERWIJDER DEZE REGELS UIT JE OUDE CODE ===
+  // stationStepper.runSpeed();  <-- DIT WAS DE OORZAAK VAN HET PROBLEEM
+  // liftStepper.runSpeed();     <-- DIT OOK
+  
+  // LED updates
   if (stationStepperState)
   {
     UpdateLedFadeMotor();
