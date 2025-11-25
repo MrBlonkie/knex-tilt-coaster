@@ -189,7 +189,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
       trainOnTiltdrop = true; // <-- zet flag
     }
-    if(message == "tiltdrop_closed")
+    if (message == "tiltdrop_closed")
     {
       trainOnTiltdrop = false;
     }
@@ -251,20 +251,20 @@ void handleAutoControl()
     if (coasterDispatched)
     {
       coasterDispatched = false;
-      // SET TARGET EENMALIG HIER
-      stationStepper.move(10000); 
       setState(STATE_DISPATCHING);
       client.publish("rollercoaster/event", "train_dispatched");
     }
     break;
 
   case STATE_DISPATCHING:
-    // Hier alleen runnen
-    stationStepper.run(); 
-    
+    stationStepper.setSpeed(600);
+    stationStepperState = true;
+    stationStepper.runSpeed();
+
     if (hallSensorExitStationState)
     {
       StopStepperMotor(stationStepper);
+      stationStepperState = false;
       setState(STATE_TO_LIFTHILL);
       client.publish("rollercoaster/event", "train_left_station");
     }
@@ -277,7 +277,7 @@ void handleAutoControl()
       digitalWrite(LIFT_ENABLE_PIN, LOW);
       digitalWrite(RELAY_PIN, HIGH);
       relayState = true;
-      
+
       liftStepper.setSpeed(600); // Snelheid zetten
       liftStepperState = true;
       setState(STATE_CLIMBING);
@@ -286,7 +286,7 @@ void handleAutoControl()
 
   case STATE_CLIMBING:
     // BELANGRIJK: De lift moet hier stappen maken!
-    liftStepper.runSpeed(); 
+    liftStepper.runSpeed();
 
     if (trainOnTiltdrop)
     {
@@ -306,26 +306,29 @@ void handleAutoControl()
     {
       client.publish("rollercoaster/event", "train_enters_station");
       // TARGET EENMALIG ZETTEN VOOR DE VOLGENDE FASE
-      stationStepper.move(10000); 
+      stationStepper.move(10000);
       setState(STATE_ENTER_STATION);
     }
     break;
 
   case STATE_ENTER_STATION:
     // Hier alleen runnen
-    stationStepper.run();
+    stationStepper.setSpeed(600);
+    stationStepperState = true;
+    stationStepper.runSpeed();
 
     if (hallSensorStartPositionState)
     {
       StopStepperMotor(stationStepper);
+      stationStepperState = false;
       client.publish("rollercoaster/event", "train_in_start_position");
       setState(STATE_IDLE);
     }
     break;
-    
+
   case STATE_ERROR:
-      // Veiligheid
-      break;
+    // Veiligheid
+    break;
   }
 }
 
@@ -401,7 +404,7 @@ void setup()
 
   // Motors
   stationStepper.setMaxSpeed(800.0);
-  stationStepper.setAcceleration(300.0);
+  stationStepper.setAcceleration(0);
 
   liftStepper.setMaxSpeed(800.0);
   liftStepper.setAcceleration(400.0);
@@ -440,9 +443,9 @@ void loop()
   }
 
   // === VERWIJDER DEZE REGELS UIT JE OUDE CODE ===
-  // stationStepper.runSpeed();  <-- DIT WAS DE OORZAAK VAN HET PROBLEEM
+  // stationStepper.runSpeed();
   // liftStepper.runSpeed();     <-- DIT OOK
-  
+
   // LED updates
   if (stationStepperState)
   {
