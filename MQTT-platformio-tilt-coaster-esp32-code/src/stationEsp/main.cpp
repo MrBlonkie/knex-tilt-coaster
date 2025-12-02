@@ -15,7 +15,7 @@ const char *connectivityTopic = "rollercoaster/station/status";
 
 // === Heartbeat Config (NON-BLOCKING) ===
 unsigned long lastHeartbeat = 0;
-const long heartbeatInterval = 2500; // 10 seconden
+const long heartbeatInterval = 2500;
 
 // === Motor Config ===
 // station

@@ -1,113 +1,190 @@
-// === LED Config (Onveranderd) ===
+// === LED Config ===
 #define NUM_LEDS_TILT 3
 #define LEDS_TILT_PIN 13
+
+#define NUM_LEDS_DROP 8
+#define LEDS_DROP_PIN 12
+
+#define NUM_LEDS_TOWER 52
+#define LEDS_TOWER_PIN 14
+
 CRGB tiltLeds[NUM_LEDS_TILT];
-unsigned long previousMillis = 0;
-unsigned long effectInterval = 50;
-CRGB colors[3] = {CRGB::Red, CRGB::Purple, CRGB::Green};
-int colorIndex[NUM_LEDS_TILT] = {0, 1, 2};
-int brightness[NUM_LEDS_TILT] = {255, 200, 150};
-int step[NUM_LEDS_TILT] = {15, 10, 20};
+CRGB dropLeds[NUM_LEDS_DROP];
+CRGB towerLeds[NUM_LEDS_TOWER];
 
-CRGB currentColor = CRGB::Blue;
-CRGB targetColor = CRGB::Blue;
-int fadeBrightness = 50;
-bool fadeIncreasing = true;
-unsigned long lastFadeMillis = 0;
-int fadeInterval = 30;
+// === TILT VARIABLES (Blauw ademen) ===
+CRGB tiltCurrentColor = CRGB::Blue;
+CRGB tiltTargetColor = CRGB::Blue;
+int tiltFadeBrightness = 50;
+bool tiltFadeIncreasing = true;
+unsigned long tiltLastFadeMillis = 0;
 
-unsigned long flashStartMillis = 0;
-int flashCount = 0;
-bool flashing = false;
+// === DROP VARIABLES (Groen ademen + Flash) ===
+CRGB dropCurrentColor = CRGB::Green;
+int dropFadeBrightness = 50;
+bool dropFadeIncreasing = true;
+unsigned long dropLastFadeMillis = 0;
+// Flash vars
+bool dropIsFlashing = false;
+unsigned long dropLastFlashMillis = 0;
+int dropFlashState = 0; // 0=Red, 1=White
 
-int redBrightness = 50;
-bool redIncreasing = true;
+// === TOWER VARIABLES ===
+unsigned long towerLastUpdate = 0;
+int towerAnimPos = 0;
+int towerHue = 0;
 
+// ==========================================
+//               TILT LOGIC
+// ==========================================
 
-
-// === LED HELPERS (Onveranderd) ===
-void setAllLeds(CRGB color, int brightnessVal)
+void setTiltLeds(CRGB color, int brightnessVal)
 {
     for (int i = 0; i < NUM_LEDS_TILT; i++)
     {
         tiltLeds[i] = color;
         tiltLeds[i].nscale8_video(brightnessVal);
     }
-    FastLED.show();
 }
 
-void SetTargetColor(CRGB newColor) { targetColor = newColor; }
-
-void UpdateLedFade()
+// Standaard Idle fade voor Tilt (Blauw)
+void UpdateTiltIdle()
 {
     unsigned long now = millis();
-    if (now - lastFadeMillis < fadeInterval)
-        return;
-    lastFadeMillis = now;
+    if (now - tiltLastFadeMillis < 30) return;
+    tiltLastFadeMillis = now;
 
-    currentColor.r += (targetColor.r - currentColor.r) / 5;
-    currentColor.g += (targetColor.g - currentColor.g) / 5;
-    currentColor.b += (targetColor.b - currentColor.b) / 5;
+    // Fade logic
+    if (tiltFadeIncreasing) tiltFadeBrightness += 5;
+    else tiltFadeBrightness -= 5;
+    
+    if (tiltFadeBrightness >= 200) tiltFadeIncreasing = false;
+    if (tiltFadeBrightness <= 50) tiltFadeIncreasing = true;
 
-    if (fadeIncreasing)
-        fadeBrightness += 5;
-    else
-        fadeBrightness -= 5;
-    if (fadeBrightness >= 150)
-        fadeIncreasing = false;
-    if (fadeBrightness <= 50)
-        fadeIncreasing = true;
-
-    setAllLeds(currentColor, fadeBrightness);
+    setTiltLeds(CRGB::Blue, tiltFadeBrightness);
 }
 
-bool LedWhiteFlash(int numFlashes, int intervalMs)
+// Witte flash (bijvoorbeeld bij beweging)
+bool UpdateTiltFlash(int numFlashes, int intervalMs)
 {
-    unsigned long now = millis();
-    static bool localFlashing = false;
-    static int localFlashCount = 0;
-    static unsigned long localStart = 0;
+    static int flashCount = 0;
+    static unsigned long lastFlash = 0;
+    static bool isActive = false;
 
-    if (!localFlashing)
-    {
-        localStart = now;
-        localFlashCount = 0;
-        localFlashing = true;
-    }
+    if (!isActive) { isActive = true; flashCount = 0; lastFlash = millis(); }
+    
+    if (millis() - lastFlash >= intervalMs) {
+        lastFlash = millis();
+        flashCount++;
+        
+        if (flashCount % 2 == 1) setTiltLeds(CRGB::White, 255);
+        else setTiltLeds(CRGB::Black, 0);
 
-    if (now - localStart >= intervalMs)
-    {
-        localStart = now;
-        localFlashCount++;
-        if (localFlashCount % 2 == 1)
-            setAllLeds(CRGB::White, 255);
-        else
-            setAllLeds(CRGB::Black, 0);
-        if (localFlashCount >= numFlashes * 2)
-        {
-            localFlashing = false;
-            return true;
+        if (flashCount >= numFlashes * 2) {
+            isActive = false;
+            return true; // Done
         }
     }
-    return false;
+    return false; // Still busy
 }
 
-void LedRedPulseFast()
+void UpdateTiltRedPulse()
 {
     unsigned long now = millis();
-    if (now - lastFadeMillis < 30)
-        return;
-    lastFadeMillis = now;
+    if (now - tiltLastFadeMillis < 20) return;
+    tiltLastFadeMillis = now;
 
-    if (redIncreasing)
-        redBrightness += 20;
-    else
-        redBrightness -= 20;
-    if (redBrightness >= 255)
-        redIncreasing = false;
-    if (redBrightness <= 50)
-        redIncreasing = true;
+    static int redBri = 50;
+    static bool redUp = true;
 
-    setAllLeds(CRGB::Red, redBrightness);
+    if (redUp) redBri += 10; else redBri -= 10;
+    if (redBri >= 255) redUp = false;
+    if (redBri <= 50) redUp = true;
+
+    setTiltLeds(CRGB::Red, redBri);
 }
 
+
+// ==========================================
+//               DROP LOGIC
+// ==========================================
+// Idle = Groen ademen
+// Triggered (offTiltdrop) = Rood/Wit flashen
+
+void UpdateDropLeds(bool isTriggered)
+{
+    unsigned long now = millis();
+
+    if (isTriggered)
+    {
+        // Rood / Wit Flash Alarm
+        if (now - dropLastFlashMillis > 100) // Snel flashen
+        {
+            dropLastFlashMillis = now;
+            dropFlashState = !dropFlashState;
+            
+            CRGB flashColor = (dropFlashState == 0) ? CRGB::Red : CRGB::White;
+            
+            for(int i=0; i<NUM_LEDS_DROP; i++) {
+                dropLeds[i] = flashColor;
+            }
+        }
+    }
+    else
+    {
+        // Idle: Groen Ademen (Zelfde logic als Tilt, aparte vars)
+        if (now - dropLastFadeMillis > 30)
+        {
+            dropLastFadeMillis = now;
+            if (dropFadeIncreasing) dropFadeBrightness += 5;
+            else dropFadeBrightness -= 5;
+
+            if (dropFadeBrightness >= 200) dropFadeIncreasing = false;
+            if (dropFadeBrightness <= 50) dropFadeIncreasing = true;
+
+            for(int i=0; i<NUM_LEDS_DROP; i++) {
+                dropLeds[i] = CRGB::Green;
+                dropLeds[i].nscale8_video(dropFadeBrightness);
+            }
+        }
+    }
+}
+
+
+// ==========================================
+//               TOWER LOGIC
+// ==========================================
+// Idle = Rustige regenboog / kleur
+// Lifthill = Animatie omhoog
+
+void UpdateTowerLeds(bool isLifthillActive)
+{
+    unsigned long now = millis();
+
+    if (isLifthillActive)
+    {
+        // === LIFTHILL ANIMATIE ===
+        // Een oranje "ketting" die omhoog loopt
+        if (now - towerLastUpdate > 30) // Snelheid van animatie
+        {
+            towerLastUpdate = now;
+            towerAnimPos++;
+            if (towerAnimPos >= NUM_LEDS_TOWER) towerAnimPos = 0;
+
+            // Fade alles een beetje uit (trail effect)
+            fadeToBlackBy(towerLeds, NUM_LEDS_TOWER, 60);
+
+            // Zet nieuwe pixel aan
+            towerLeds[towerAnimPos] = CRGB::Orange;
+            // Maak hem fel
+            towerLeds[towerAnimPos].maximizeBrightness();
+        }
+    }
+    else
+    {
+        // === IDLE ANIMATIE ===
+        // Rustige regenboog golf
+        fill_solid(towerLeds, NUM_LEDS_TOWER, CRGB::Black);
+
+    }
+}
