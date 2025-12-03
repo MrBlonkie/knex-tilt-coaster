@@ -1,26 +1,15 @@
 # knex-tilt-coaster
 
-TODO:
-- klemmen voor kabels (voeding)
-- zekering? vragen aan MRG
-- sensor states (block zoning)
-- hallsensor achter drop wordt niet getriggerd
-- flow programma
-- clean up code with .h files
-- andere library voor steppermotor testen (lifthill)
-- master moet slaves kunnen hard resetten (fysieke kabel vereist)
 
-PROGRAM FEATURES:
-- ping pong bij opstarten met alle ESP's (met resets)
-- verschillende modi
+ _                         _   _ _ _                            _            
+| | ___ __   _____  __    | |_(_) | |_       ___ ___   __ _ ___| |_ ___ _ __ 
+| |/ / '_ \ / _ \ \/ /____| __| | | __|____ / __/ _ \ / _` / __| __/ _ \ '__|
+|   <| | | |  __/>  <_____| |_| | | ||_____| (_| (_) | (_| \__ \ ||  __/ |   
+|_|\_\_| |_|\___/_/\_\     \__|_|_|\__|     \___\___/ \__,_|___/\__\___|_|   
+
+
 
 
 <img src="/pictures/tiltdrop_WIP.jpg">
 
-aanpak:
 
-per segment functies maken per actie
-segment automatisch laten werken
-
-master/slave geimplementeerd, eerst 1 master 1 slave, later uitbreiden
-functies die al geprogrammeerd waren (en mogelijks combineren) en in commandos steken
