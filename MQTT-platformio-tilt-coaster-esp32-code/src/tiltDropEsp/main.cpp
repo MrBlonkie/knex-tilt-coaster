@@ -60,10 +60,17 @@ bool hallSensorTiltdropClosedState = false;
 bool hallSensorTiltdropOpenState = false;
 bool hallSensorOffTiltdropState = false;
 
+bool hallSensorOnTiltdropCheck = false;
+bool hallSensorOffTiltdropCheck = false;
+bool cartOnTiltdrop = false;
+
 bool ledDropControlState = false;
 
 bool tiltdropReady = false; // Is true wanneer trein op lifthill is (onderweg naar tilt)
+bool trainOnLayout = false;
 bool autoMode = false;
+
+String latestEventMsg = "";
 
 // === STATES ===
 enum CoasterState
@@ -166,6 +173,8 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
         manualMode = false;
         tiltdropMotorManual = false;
+        hallSensorOffTiltdropCheck = false;
+        hallSensorOnTiltdropCheck = false;
         // close tiltdropmotor if not closed
         if (hallSensorTiltdropClosedState)
         {
@@ -282,6 +291,7 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
             tiltdropReady = true; // <-- zet flag
         }
+        latestEventMsg = message;
     }
 }
 
@@ -308,6 +318,7 @@ void connectMQTT()
             client.subscribe("rollercoaster/control/auto");
             client.subscribe("rollercoaster/event");
             client.subscribe("rollercoaster/dispatch");
+            client.subscribe("rollercoaster/sensor");
         }
         else
         {
@@ -337,6 +348,10 @@ void publishStatusIfChanged()
     status += ",\"hallSensorTiltdropClosed\":" + String(hallSensorTiltdropClosedState ? "true" : "false");
     status += ",\"hallSensorTiltdropOpen\":" + String(hallSensorTiltdropOpenState ? "true" : "false");
     status += ",\"hallSensorOffTiltdrop\":" + String(hallSensorOffTiltdropState ? "true" : "false");
+    status += ",\"hallSensorOffTiltdropCheck\":" + String(hallSensorOffTiltdropCheck ? "true" : "false");
+    status += ",\"hallSensorOnTiltdropCheck\":" + String(hallSensorOnTiltdropCheck ? "true" : "false");
+    status += ",\"cartOnTiltdrop\":" + String(cartOnTiltdrop ? "true" : "false");
+    status += ",\"trainOnLayout\":" + String(trainOnLayout ? "true" : "false");
     status += ",\"tiltdropMotorMoving\":" + String(tiltdropMotorMoving ? "true" : "false");
     status += ",\"isTiltdropTrackOpen\":" + String(isTiltdropTrackOpen ? "true" : "false"); // Deze is nu veel accurater
     status += ",\"manualMode\":" + String(manualMode ? "true" : "false");
@@ -408,10 +423,14 @@ void handleAutoControl()
         {
             Serial.println("[STATE] IDLE");
             stateEntry = false;
+            hallSensorOffTiltdropCheck = false;
+            hallSensorOnTiltdropCheck = false;
         }
         if (tiltdropReady && hallSensorOnTiltdropState)
         {
             client.publish("rollercoaster/event", "train_on_tiltdrop");
+            hallSensorOnTiltdropCheck = true;
+            cartOnTiltdrop = true;
             tiltdropReady = false; // Trein is gearriveerd, Tower animatie stopt hierna ook
             coasterDispatched = false;
             setState(STATE_ON_TILTDROP);
@@ -452,9 +471,12 @@ void handleAutoControl()
             servoActionStart = millis();
             stateEntry = false;
         }
-        if (millis() - servoActionStart > 1000)
+        if (hallSensorOffTiltdropState)
         {
             client.publish("rollercoaster/event", "releasedrop_open");
+            cartOnTiltdrop = false;
+            hallSensorOffTiltdropCheck = true;
+            trainOnLayout = true;
             setState(STATE_RESET_TILTDROP);
         }
         break;
@@ -482,6 +504,10 @@ void handleAutoControl()
         {
             client.publish("rollercoaster/event", "tiltdrop_closed");
             isTiltdropTrackOpen = false;
+        }
+        if(latestEventMsg == "train_enters_station")
+        {
+            trainOnLayout = false;
             setState(STATE_IDLE);
         }
         break;

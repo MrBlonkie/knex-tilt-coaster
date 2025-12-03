@@ -50,6 +50,15 @@ bool hallSensorBottomLifthillState = false;
 bool hallSensorEnterStationState = false;
 bool hallSensorStartPositionState = false;
 
+bool hallSensorExitStationCheck = false;
+bool hallSensorBottomLifthillCheck = false;
+bool hallSensorEnterStationCheck = false;
+bool hallSensorStartPositionCheck = false;
+
+bool cartOnStation = false;
+bool cartOnLifthill = false;
+bool cartOnTurn = false;
+
 bool trainOnTiltdrop = false;
 bool autoMode = false;
 
@@ -129,6 +138,10 @@ void callback(char *topic, byte *payload, unsigned int length)
     StopStepperMotor(liftStepper);
     stationStepperState = false;
     liftStepperState = false;
+    hallSensorStartPositionCheck = false;
+    hallSensorExitStationCheck = false;
+    hallSensorBottomLifthillCheck = false;
+    hallSensorEnterStationCheck = false;
   }
   else if (String(topic) == "rollercoaster/dispatch" && message == "go")
   {
@@ -221,6 +234,7 @@ void connectMQTT()
       client.subscribe("rollercoaster/control/auto");
       client.subscribe("rollercoaster/event");
       client.subscribe("rollercoaster/dispatch");
+      client.subscribe("rollercoaster/sensor");
     }
     else
     {
@@ -246,15 +260,17 @@ void handleAutoControl()
 {
   switch (currentState)
   {
-  case STATE_IDLE:
+   case STATE_IDLE:
     // Wacht op dispatch commando
     if (coasterDispatched)
     {
+      cartOnStation = true; //temp dit moet nog beter kunnen
       coasterDispatched = false;
       setState(STATE_DISPATCHING);
       client.publish("rollercoaster/event", "train_dispatched");
     }
     break;
+    
 
   case STATE_DISPATCHING:
     stationStepper.setSpeed(600);
@@ -263,6 +279,9 @@ void handleAutoControl()
 
     if (hallSensorExitStationState)
     {
+      hallSensorExitStationCheck = true;
+      cartOnTurn = true;
+      cartOnStation = false;
       StopStepperMotor(stationStepper);
       stationStepperState = false;
       setState(STATE_TO_LIFTHILL);
@@ -273,6 +292,9 @@ void handleAutoControl()
   case STATE_TO_LIFTHILL:
     if (hallSensorBottomLifthillState)
     {
+      hallSensorBottomLifthillCheck = true;
+      cartOnTurn = false;
+      cartOnLifthill = true;
       client.publish("rollercoaster/event", "train_on_lifthill");
       digitalWrite(LIFT_ENABLE_PIN, LOW);
       digitalWrite(RELAY_PIN, HIGH);
@@ -285,12 +307,12 @@ void handleAutoControl()
     break;
 
   case STATE_CLIMBING:
-    // BELANGRIJK: De lift moet hier stappen maken!
     liftStepper.runSpeed();
 
     if (trainOnTiltdrop)
     {
       trainOnTiltdrop = false;
+      cartOnLifthill = false;
       StopStepperMotor(liftStepper);
       digitalWrite(LIFT_ENABLE_PIN, HIGH);
       digitalWrite(RELAY_PIN, LOW); // Let op: stond in je oude code ook op HIGH (fan uit?)
@@ -304,6 +326,8 @@ void handleAutoControl()
   case STATE_RIDING:
     if (hallSensorEnterStationState)
     {
+      hallSensorEnterStationCheck = true;
+      cartOnStation = true;
       client.publish("rollercoaster/event", "train_enters_station");
       // TARGET EENMALIG ZETTEN VOOR DE VOLGENDE FASE
       stationStepper.move(10000);
@@ -319,6 +343,10 @@ void handleAutoControl()
 
     if (hallSensorStartPositionState)
     {
+      hallSensorStartPositionCheck = true;
+      hallSensorExitStationCheck = false;
+      hallSensorBottomLifthillCheck = false;
+      hallSensorEnterStationCheck = false;
       StopStepperMotor(stationStepper);
       stationStepperState = false;
       client.publish("rollercoaster/event", "train_in_start_position");
@@ -355,6 +383,13 @@ void publishStatusIfChanged()
   status += ",\"hallSensorBottomLifthill\":" + String(hallSensorBottomLifthillState ? "true" : "false");
   status += ",\"hallSensorEnterStation\":" + String(hallSensorEnterStationState ? "true" : "false");
   status += ",\"hallSensorStartPosition\":" + String(hallSensorStartPositionState ? "true" : "false");
+  status += ",\"hallSensorExitStationCheck\":" + String(hallSensorExitStationCheck ? "true" : "false");
+  status += ",\"hallSensorBottomLifthillCheck\":" + String(hallSensorBottomLifthillCheck ? "true" : "false");
+  status += ",\"hallSensorEnterStationCheck\":" + String(hallSensorEnterStationCheck ? "true" : "false");
+  status += ",\"hallSensorStartPositionCheck\":" + String(hallSensorStartPositionCheck ? "true" : "false");
+  status += ",\"cartOnStation\":" + String(cartOnStation ? "true" : "false");
+  status += ",\"cartOnLifthill\":" + String(cartOnLifthill ? "true" : "false");
+  status += ",\"cartOnTurn\":" + String(cartOnTurn ? "true" : "false");
   status += ",\"coasterDispatched\":" + String(coasterDispatched ? "true" : "false");
   status += ",\"manualMode\":" + String(manualMode ? "true" : "false");
   status += ",\"stationMotorManual\":" + String(stationMotorManual ? "true" : "false");
