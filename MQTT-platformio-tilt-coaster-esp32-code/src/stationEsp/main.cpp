@@ -3,14 +3,13 @@
 #include <AccelStepper.h>
 #include <FastLED.h>
 #include "LedSetup.h"
-#include "../shared/env.h" // ssid & password, mqtt_server, mqtt_port
+#include "../shared/env.h" // ssid, password, mqtt_server, mqtt_port
 
 // === WiFi & MQTT ===
 WiFiClient espClient;
 PubSubClient client(espClient);
 const char *deviceName = "station";
 String clientId;
-// De topic voor de connectiviteitsstatus (Heartbeat)
 const char *connectivityTopic = "rollercoaster/station/status";
 
 // === Heartbeat Config (NON-BLOCKING) ===
@@ -18,7 +17,7 @@ unsigned long lastHeartbeat = 0;
 const long heartbeatInterval = 2500;
 
 // === Motor Config ===
-// station
+// +++ Station +++
 #define STATION_IN1 18
 #define STATION_IN2 19
 #define STATION_IN3 22
@@ -27,7 +26,7 @@ const long heartbeatInterval = 2500;
 AccelStepper stationStepper(AccelStepper::FULL4WIRE, STATION_IN1, STATION_IN3, STATION_IN2, STATION_IN4);
 bool stationStepperState = false;
 
-// lifthill
+// +++ Lifthill +++
 #define LIFT_DIR_PIN 26
 #define LIFT_STEP_PIN 27
 #define LIFT_ENABLE_PIN 14
@@ -35,7 +34,7 @@ bool stationStepperState = false;
 AccelStepper liftStepper(AccelStepper::DRIVER, LIFT_STEP_PIN, LIFT_DIR_PIN);
 bool liftStepperState = false;
 
-// fan
+// === Fan ===
 #define RELAY_PIN 12
 bool relayState = false;
 
@@ -50,17 +49,21 @@ bool hallSensorBottomLifthillState = false;
 bool hallSensorEnterStationState = false;
 bool hallSensorStartPositionState = false;
 
+// === Helper Bools / State Control ===
 bool hallSensorExitStationCheck = false;
 bool hallSensorBottomLifthillCheck = false;
 bool hallSensorEnterStationCheck = false;
 bool hallSensorStartPositionCheck = false;
 
-bool cartOnStation = false;
-bool cartOnLifthill = false;
-bool cartOnTurn = false;
-
+bool trainOnStation = false;
+bool trainOnLifthill = false;
+bool trainOnTurn = false;
 bool trainOnTiltdrop = false;
-bool autoMode = false;
+
+bool coasterDispatched = false;
+bool manualMode = false;
+bool stationMotorManual = false;
+bool liftMotorManual = false;
 
 // === States ===
 enum CoasterState
@@ -106,11 +109,6 @@ void setState(CoasterState newState)
   Serial.println("[STATE] → " + currentStateName);
 }
 
-// === State control vars ===
-bool coasterDispatched = false;
-bool manualMode = false;
-bool stationMotorManual = false;
-bool liftMotorManual = false;
 
 // === Helper motor stop ===
 void StopStepperMotor(AccelStepper &motor)
@@ -264,7 +262,7 @@ void handleAutoControl()
     // Wacht op dispatch commando
     if (coasterDispatched)
     {
-      cartOnStation = true; //temp dit moet nog beter kunnen
+      trainOnStation = true; //temp dit moet nog beter kunnen
       coasterDispatched = false;
       setState(STATE_DISPATCHING);
       client.publish("rollercoaster/event", "train_dispatched");
@@ -280,8 +278,8 @@ void handleAutoControl()
     if (hallSensorExitStationState)
     {
       hallSensorExitStationCheck = true;
-      cartOnTurn = true;
-      cartOnStation = false;
+      trainOnTurn = true;
+      trainOnStation = false;
       StopStepperMotor(stationStepper);
       stationStepperState = false;
       setState(STATE_TO_LIFTHILL);
@@ -293,8 +291,8 @@ void handleAutoControl()
     if (hallSensorBottomLifthillState)
     {
       hallSensorBottomLifthillCheck = true;
-      cartOnTurn = false;
-      cartOnLifthill = true;
+      trainOnTurn = false;
+      trainOnLifthill = true;
       client.publish("rollercoaster/event", "train_on_lifthill");
       digitalWrite(LIFT_ENABLE_PIN, LOW);
       digitalWrite(RELAY_PIN, HIGH);
@@ -312,7 +310,7 @@ void handleAutoControl()
     if (trainOnTiltdrop)
     {
       trainOnTiltdrop = false;
-      cartOnLifthill = false;
+      trainOnLifthill = false;
       StopStepperMotor(liftStepper);
       digitalWrite(LIFT_ENABLE_PIN, HIGH);
       digitalWrite(RELAY_PIN, LOW); // Let op: stond in je oude code ook op HIGH (fan uit?)
@@ -327,7 +325,7 @@ void handleAutoControl()
     if (hallSensorEnterStationState)
     {
       hallSensorEnterStationCheck = true;
-      cartOnStation = true;
+      trainOnStation = true;
       client.publish("rollercoaster/event", "train_enters_station");
       // TARGET EENMALIG ZETTEN VOOR DE VOLGENDE FASE
       stationStepper.move(10000);
@@ -387,9 +385,9 @@ void publishStatusIfChanged()
   status += ",\"hallSensorBottomLifthillCheck\":" + String(hallSensorBottomLifthillCheck ? "true" : "false");
   status += ",\"hallSensorEnterStationCheck\":" + String(hallSensorEnterStationCheck ? "true" : "false");
   status += ",\"hallSensorStartPositionCheck\":" + String(hallSensorStartPositionCheck ? "true" : "false");
-  status += ",\"cartOnStation\":" + String(cartOnStation ? "true" : "false");
-  status += ",\"cartOnLifthill\":" + String(cartOnLifthill ? "true" : "false");
-  status += ",\"cartOnTurn\":" + String(cartOnTurn ? "true" : "false");
+  status += ",\"trainOnStation\":" + String(trainOnStation ? "true" : "false");
+  status += ",\"trainOnLifthill\":" + String(trainOnLifthill ? "true" : "false");
+  status += ",\"trainOnTurn\":" + String(trainOnTurn ? "true" : "false");
   status += ",\"coasterDispatched\":" + String(coasterDispatched ? "true" : "false");
   status += ",\"manualMode\":" + String(manualMode ? "true" : "false");
   status += ",\"stationMotorManual\":" + String(stationMotorManual ? "true" : "false");
@@ -477,9 +475,6 @@ void loop()
     handleAutoControl();
   }
 
-  // === VERWIJDER DEZE REGELS UIT JE OUDE CODE ===
-  // stationStepper.runSpeed();
-  // liftStepper.runSpeed();     <-- DIT OOK
 
   // LED updates
   if (stationStepperState)

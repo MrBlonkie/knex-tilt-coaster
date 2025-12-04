@@ -3,7 +3,7 @@
 #include <AccelStepper.h>
 #include <ESP32Servo.h>
 #include <FastLED.h>
-#include "LedSetup.h"      // Zorg dat de nieuwe versie hierboven gebruikt wordt
+#include "LedSetup.h" 
 #include "../shared/env.h" // ssid, password, mqtt_server, mqtt_portt
 
 // === WiFi & MQTT ===
@@ -66,9 +66,8 @@ bool cartOnTiltdrop = false;
 
 bool ledDropControlState = false;
 
-bool tiltdropReady = false; // Is true wanneer trein op lifthill is (onderweg naar tilt)
+bool trainOnLifthill = false; // Is true wanneer trein op lifthill is (onderweg naar tilt)
 bool trainOnLayout = false;
-bool autoMode = false;
 
 String latestEventMsg = "";
 
@@ -120,12 +119,11 @@ void updateTiltdropSensors()
     hallSensorOffTiltdropState = (digitalRead(hallSensorOffTiltdrop) == LOW);
 }
 
-// === LED CONTROL LOOP ===
+// === Led Control (see LedSetup.h for code)===
 void UpdateLeds()
 {
     static bool whiteFlashesDone = false;
 
-    // 1. TILT LEDS LOGIC
     if (!tiltdropMotorMoving)
     {
         whiteFlashesDone = false;
@@ -143,16 +141,8 @@ void UpdateLeds()
         }
     }
 
-    // 2. DROP LEDS LOGIC
-    // Als de offtiltdrop sensor (einde drop) getriggerd wordt -> Rood/Wit Alarm
-    // Anders -> Groen Ademen
     UpdateDropLeds(ledDropControlState);
-
-    // 3. TOWER LEDS LOGIC
-    // Als tiltdropReady true is, betekent dit dat de trein op de lifthill is (onderweg naar ons)
-    UpdateTowerLeds(tiltdropReady);
-
-    // Show voor alle strips in één keer
+    UpdateTowerLeds(trainOnLifthill);
     FastLED.show();
 }
 
@@ -175,7 +165,8 @@ void callback(char *topic, byte *payload, unsigned int length)
         tiltdropMotorManual = false;
         hallSensorOffTiltdropCheck = false;
         hallSensorOnTiltdropCheck = false;
-        // close tiltdropmotor if not closed
+
+        // close tilt if not closed
         if (hallSensorTiltdropClosedState)
         {
             Serial.println("[MANUAL] Motor is al dicht.");
@@ -289,7 +280,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
         if (message == "train_on_lifthill")
         {
-            tiltdropReady = true; // <-- zet flag
+            trainOnLifthill = true; // <-- zet flag
         }
         latestEventMsg = message;
     }
@@ -338,7 +329,7 @@ void publishHeartbeat()
     }
 }
 
-// === Publish Status via MQTT (Onveranderd) ===
+// === Publish Status via MQTT ===
 String lastStatus = "";
 
 void publishStatusIfChanged()
@@ -353,7 +344,7 @@ void publishStatusIfChanged()
     status += ",\"cartOnTiltdrop\":" + String(cartOnTiltdrop ? "true" : "false");
     status += ",\"trainOnLayout\":" + String(trainOnLayout ? "true" : "false");
     status += ",\"tiltdropMotorMoving\":" + String(tiltdropMotorMoving ? "true" : "false");
-    status += ",\"isTiltdropTrackOpen\":" + String(isTiltdropTrackOpen ? "true" : "false"); // Deze is nu veel accurater
+    status += ",\"isTiltdropTrackOpen\":" + String(isTiltdropTrackOpen ? "true" : "false");
     status += ",\"manualMode\":" + String(manualMode ? "true" : "false");
     status += ",\"releasedropMotorState\":" + String(releasedropMotorState ? "true" : "false");
     status += ",\"currentState\":\"" + currentStateName + "\"";
@@ -426,12 +417,12 @@ void handleAutoControl()
             hallSensorOffTiltdropCheck = false;
             hallSensorOnTiltdropCheck = false;
         }
-        if (tiltdropReady && hallSensorOnTiltdropState)
+        if (trainOnLifthill && hallSensorOnTiltdropState)
         {
             client.publish("rollercoaster/event", "train_on_tiltdrop");
             hallSensorOnTiltdropCheck = true;
             cartOnTiltdrop = true;
-            tiltdropReady = false; // Trein is gearriveerd, Tower animatie stopt hierna ook
+            trainOnLifthill = false; // Trein is gearriveerd, Tower animatie stopt hierna ook
             coasterDispatched = false;
             setState(STATE_ON_TILTDROP);
         }
@@ -542,11 +533,10 @@ void setup()
     connectMQTT();
 
     // === LED SETUP ===
-    // Voeg alle strips toe aan FastLED
     FastLED.addLeds<NEOPIXEL, LEDS_TILT_PIN>(tiltLeds, NUM_LEDS_TILT);
     FastLED.addLeds<NEOPIXEL, LEDS_DROP_PIN>(dropLeds, NUM_LEDS_DROP);
     FastLED.addLeds<NEOPIXEL, LEDS_TOWER_PIN>(towerLeds, NUM_LEDS_TOWER);
-    FastLED.setBrightness(255); // Globale max brightness
+    FastLED.setBrightness(255); // Globale max brightness var
 
     pinMode(hallSensorOnTiltdrop, INPUT_PULLUP);
     pinMode(hallSensorTiltdropClosed, INPUT_PULLUP);
@@ -573,7 +563,6 @@ void loop()
     publishStatusIfChanged();
     moveTiltdropMotor();
 
-    // De nieuwe UpdateLeds functie roept alle effecten aan
     UpdateLeds();
 
     if (!manualMode)
