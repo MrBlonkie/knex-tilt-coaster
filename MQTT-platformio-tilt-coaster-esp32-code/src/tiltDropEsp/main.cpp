@@ -49,6 +49,32 @@ bool coasterDispatched = false;
 Servo releaseServo;
 bool releasedropMotorState = false;
 
+int currentPos = 90;
+int targetPos = 0;
+unsigned long lastStep = 0;
+const unsigned long stepInterval = 2;
+
+bool moveServoSmooth(Servo &servo, int &current, int target) {
+    unsigned long now = millis();
+    if (now - lastStep < stepInterval) return false;
+    lastStep = now;
+
+    if (current < target) {
+        current++;
+        servo.write(current);
+        return (current == target);
+    } 
+    else if (current > target) {
+        current--;
+        servo.write(current);
+        return (current == target);
+    }
+
+    // already at target
+    return true;
+}
+
+
 // === Sensors ===
 #define hallSensorOnTiltdrop 34
 #define hallSensorTiltdropClosed 26
@@ -190,12 +216,8 @@ void callback(char *topic, byte *payload, unsigned int length)
         }
 
         // close servo if not closed
-        if (releasedropMotorState)
-        {
-            for (int pos = 0; pos <= 90; pos++)
-                releaseServo.write(pos);
+            targetPos = 90;
             releasedropMotorState = false;
-        }
     }
 
     else if (String(topic) == "tiltdrop/tiltdropmotor" && message == "open")
@@ -254,19 +276,16 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
         if (manualMode)
         {
-            // Servo blocking code—NOTE: This should be non-blocking in a final version!
-            for (int pos = 90; pos >= 0; pos--)
-                releaseServo.write(pos);
+            targetPos = 0; //set target for servo, other code in main loop
             releasedropMotorState = true;
+
         }
     }
     else if (String(topic) == "tiltdrop/releasedropmotor" && message == "close")
     {
         if (manualMode)
         {
-            // Servo blocking code—NOTE: This should be non-blocking in a final version!
-            for (int pos = 0; pos <= 90; pos++)
-                releaseServo.write(pos);
+            targetPos = 90; //set target for closing servo, other code in main loop
             releasedropMotorState = false;
         }
     }
@@ -454,9 +473,7 @@ void handleAutoControl()
         if (stateEntry)
         {
             client.publish("rollercoaster/event", "releasedrop_opening");
-            // Servo blocking (tijdelijk)
-            for (int pos = 90; pos >= 0; pos--)
-                releaseServo.write(pos);
+            targetPos = 0; //set target for opening servo, other code in main loop
             releasedropMotorState = true;
             ledDropControlState = true;
             servoActionStart = millis();
@@ -476,8 +493,7 @@ void handleAutoControl()
         if (stateEntry)
         {
             client.publish("rollercoaster/event", "tiltdrop_resetting");
-            for (int pos = 0; pos <= 90; pos++)
-                releaseServo.write(pos);
+            targetPos = 90; //set target for closing servo, other code in main loop
             releasedropMotorState = false;
 
             tiltTrackStepper.move(9999999);
@@ -545,6 +561,7 @@ void setup()
 
     tiltTrackStepper.setMaxSpeed(MOTOR_SPEED_FAST);
     tiltTrackStepper.setAcceleration(200.0);
+
     releaseServo.attach(SERVO_PIN);
 
     updateTiltdropSensors();
@@ -567,4 +584,9 @@ void loop()
 
     if (!manualMode)
         handleAutoControl();
+
+    // servo non-blocking handler
+    moveServoSmooth(releaseServo, currentPos, targetPos);
+
+
 }
