@@ -301,6 +301,11 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
             trainOnLifthill = true; // <-- zet flag
         }
+        if(message == "train_enters_station")
+        {
+            trainOnLayout = false;
+            
+        }
         latestEventMsg = message;
     }
 }
@@ -511,10 +516,6 @@ void handleAutoControl()
         {
             client.publish("rollercoaster/event", "tiltdrop_closed");
             isTiltdropTrackOpen = false;
-        }
-        if(latestEventMsg == "train_enters_station")
-        {
-            trainOnLayout = false;
             setState(STATE_IDLE);
         }
         break;
@@ -563,6 +564,7 @@ void setup()
     tiltTrackStepper.setAcceleration(200.0);
 
     releaseServo.attach(SERVO_PIN);
+    targetPos = 90;
 
     updateTiltdropSensors();
     isTiltdropTrackOpen = hallSensorTiltdropOpenState;
