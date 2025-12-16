@@ -39,8 +39,8 @@ void StopStepperMotor(AccelStepper &motor)
 Servo releaseServo;
 bool releaseswitchMotorState = false;
 
-int currentPos = 90;
-int targetPos = 0;
+int currentPos = 0;
+int targetPos = 90;
 unsigned long lastServoStep = 0;
 const unsigned long stepInterval = 2;
 
@@ -107,8 +107,8 @@ String latestEventMsg = "";
 // === Tilt instellingen per bestemming ===
 const int tiltStepSizeBrakes = -50;    // richting brakes
 const int tiltStepSizeStation = 12;    // richting station (reverse van brakes)
-const int tiltExtraStepsBrakes = 100;  // extra stappen na brakes
-const int tiltExtraStepsStation = 150; // extra stappen na station
+const int tiltExtraStepsBrakes = 350;  // extra stappen na brakes
+const int tiltExtraStepsStation = 170; // extra stappen na station
 const long tiltIntervalBrakes = 80;    // interval voor tilt-update
 const long tiltIntervalStation = 110;  // interval voor tilt-update
 
@@ -116,6 +116,7 @@ const long tiltIntervalStation = 110;  // interval voor tilt-update
 bool droppingToTarget = false;
 bool doingExtraTiltSteps = false;
 bool trainInStationFlag = false;
+bool isSwitchtrackMoving = false;
 
 unsigned long stateStartTime = 0; // Timer voor in de state machine
 bool timerActive = false;         // Om te checken of we aan het wachten zijn
@@ -186,11 +187,13 @@ void handleMovement()
   {
     rotatingStepper.stop();
     StopStepperMotor(tiltingStepper);
+    isSwitchtrackMoving = false;
     droppingToTarget = false;
     doingExtraTiltSteps = false;
     return;
   }
 
+  isSwitchtrackMoving = true;
   // Tilt accumulator
   static long tiltAccumulator = 0;
   static long lastRotPos = 0;
@@ -274,6 +277,11 @@ void callback(char *topic, byte *payload, unsigned int length)
     else if (message == "off")
     {
       manualMode = false;
+      //reset motors
+      targetSpeed = -500;
+      manualRotateTarget = "brakes";
+      targetPos = 90;
+      releaseswitchMotorState = false;
       Serial.println("Manual mode DISABLED");
     }
   }
@@ -305,13 +313,13 @@ void callback(char *topic, byte *payload, unsigned int length)
       if (message == "open")
       {
         Serial.println("COMMAND: Servo Open");
-        targetPos = 90;
+        targetPos = 0;
         releaseswitchMotorState = true;
       }
       if (message == "close")
       {
         Serial.println("COMMAND: Servo Close");
-        targetPos = 0;
+        targetPos = 90;
         releaseswitchMotorState = false;
       }
     }
@@ -321,7 +329,7 @@ void callback(char *topic, byte *payload, unsigned int length)
       Serial.println("recieved dipsatch go command");
     }
   }
-  if (String(topic) == "rollercoaster/event" && message == "train_enters_station")
+  if (String(topic) == "rollercoaster/event" && message == "train_in_start_position")
   {
     trainInStationFlag = true; // <-- zet flag
   }
@@ -364,8 +372,9 @@ void publishStatusIfChanged()
   status += ",\"hallSensorStationConnect\":" + String(hallSensorStationConnectState ? "true" : "false");
   status += ",\"hallSensorOnSwitchtrack\":" + String(hallSensorOnSwitchtrackState ? "true" : "false");
   status += ",\"releaseswitchMotorState\":" + String(releaseswitchMotorState ? "true" : "false");
+  status += ",\"isSwitchtrackMoving\":" + String(isSwitchtrackMoving ? "true" : "false");
   status += ",\"manualMode\":" + String(manualMode ? "true" : "false");
-  status += ",\"currentState\":\"" + manualRotateTarget + "\"";
+  status += ",\"rotateTarget\":\"" + manualRotateTarget + "\"";
   status += "}";
 
   if (status != lastStatus)
@@ -450,7 +459,7 @@ void handleAutoControl()
   case STATE_RELEASE:
     if (hallSensorStationConnectState)
     {
-      targetPos = 90; // open servo
+      targetPos = 0; // open servo
       releaseswitchMotorState = true;
       Serial.println("[AUTO] Train released -> RESET");
       client.publish("rollercoaster/event", "released_train_switchtrack");
@@ -468,7 +477,7 @@ void handleAutoControl()
       }
       if (millis() - stateStartTime >= 1000)
       {
-        targetPos = 0; // close servo
+        targetPos = 90; // close servo
         releaseswitchMotorState = false;
 
         targetSpeed = -500; // stepper dir brakes
@@ -523,6 +532,7 @@ void setup()
   tiltingStepper.setAcceleration(200);
 
   releaseServo.attach(SERVO_PIN);
+  
 }
 
 void loop()
