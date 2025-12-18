@@ -124,6 +124,12 @@ bool doingExtraTiltSteps = false;
 bool trainInStationFlag = false;
 bool isSwitchtrackMoving = false;
 
+bool onSwitchtrackFlag = false;
+bool resetSwitchtrackFlag = false;
+bool switchtrackResetted = false;
+bool switchtrackFreeFlag = false;
+bool switchtrackSafetyFlag = false;
+
 unsigned long stateStartTime = 0; // Timer voor in de state machine
 bool timerActive = false;         // Om te checken of we aan het wachten zijn
 
@@ -283,7 +289,6 @@ void callback(char *topic, byte *payload, unsigned int length)
   {
     switchtrackSafetyFlag = false;
     client.publish("rollercoaster/event", "cleared_switchtrack_safety_flag");
-    
   }
   if (String(topic) == "rollercoaster/event" && message == "train_enters_station")
   {
@@ -333,16 +338,37 @@ String lastStatus = "";
 void publishStatusIfChanged()
 {
   String status = "{";
-  status += "\"hallSensorBrakeConnect\":" + String(hallSensorBrakeConnectState ? "true" : "false");
-  status += ",\"hallSensorMiddle\":" + String(hallSensorMiddleState ? "true" : "false");
-  status += ",\"hallSensorStationConnect\":" + String(hallSensorStationConnectState ? "true" : "false");
-  status += ",\"hallSensorOnSwitchtrack\":" + String(hallSensorOnSwitchtrackState ? "true" : "false");
-  status += ",\"releaseswitchMotorState\":" + String(releaseswitchMotorState ? "true" : "false");
+
+  status += "\"sensors\":{";
+  status += "\"hallSensorBrakeConnectState\":" + String(hallSensorBrakeConnectState ? "true" : "false");
+  status += ",\"hallSensorMiddleState\":" + String(hallSensorMiddleState ? "true" : "false");
+  status += ",\"hallSensorStationConnectState\":" + String(hallSensorStationConnectState ? "true" : "false");
+  status += ",\"hallSensorOnSwitchtrackState\":" + String(hallSensorOnSwitchtrackState ? "true" : "false");
+  status += "},";
+
+  status += "\"switchtrack\":{";
+  status += "\"releaseswitchMotorState\":" + String(releaseswitchMotorState ? "true" : "false");
   status += ",\"isSwitchtrackMoving\":" + String(isSwitchtrackMoving ? "true" : "false");
-  status += ",\"manualMode\":" + String(manualMode ? "true" : "false");
-  status += ",\"rotateTarget\":\"" + manualRotateTarget + "\"";
-  status += ",\"isSwitchtrackOccupied\":" + String(isSwitchtrackOccupied ? "true" : "false");
+  status += ",\"manualRotateTarget\":\"" + manualRotateTarget + "\"";
+  status += "},";
+
+  status += "\"mode\":{";
+  status += "\"manualMode\":" + String(manualMode ? "true" : "false");
+  status += "},";
+
+  status += "\"blocks\":{";
+  status += "\"isSwitchtrackOccupied\":" + String(isSwitchtrackOccupied ? "true" : "false");
   status += ",\"isNextBlockFree\":" + String(isNextBlockFree ? "true" : "false");
+  status += "},";
+
+  status += "\"flags\":{";
+  status += "\"onSwitchtrackFlag\":" + String(onSwitchtrackFlag ? "true" : "false");
+  status += ",\"resetSwitchtrackFlag\":" + String(resetSwitchtrackFlag ? "true" : "false");
+  status += ",\"switchtrackResetted\":" + String(switchtrackResetted ? "true" : "false");
+  status += ",\"switchtrackFreeFlag\":" + String(switchtrackFreeFlag ? "true" : "false");
+  status += ",\"switchtrackSafetyFlag\":" + String(switchtrackSafetyFlag ? "true" : "false");
+  status += "}";
+
   status += "}";
 
   if (status != lastStatus)
@@ -384,12 +410,6 @@ void connectMQTT()
     }
   }
 }
-
-bool onSwitchtrackFlag = false;
-bool resetSwitchtrackFlag = false;
-bool switchtrackResetted = false;
-bool switchtrackFreeFlag = false;
-bool switchtrackSafetyFlag = false;
 
 void handleSwitchtrackBlockV2()
 {
@@ -479,71 +499,6 @@ void handleSwitchtrackBlockV2()
   }
 }
 
-void handleSwitchtrackBlock()
-{
-  unsigned long now = millis();
-
-  // FASE 1: Trein komt aan en stabiliseert
-  if (hallSensorOnSwitchtrackState && !isSwitchtrackOccupied)
-  {
-    if (!stabilizationStarted)
-    {
-      stateStartTime = now;
-      stabilizationStarted = true;
-      client.publish("rollercoaster/block/event", "switchtrack_occupied");
-    }
-
-    if (stabilizationStarted && (now - stateStartTime >= 2000))
-    {
-      isSwitchtrackOccupied = true;
-      targetSpeed = 500;
-      manualRotateTarget = "station";
-      client.publish("rollercoaster/event", "rotating_switchtrack_to_station");
-      stabilizationStarted = false; // Klaar met deze fase
-    }
-  }
-
-  // FASE 2: Aankomst bij station & Loslaten
-  if (hallSensorStationConnectState && isSwitchtrackOccupied && isNextBlockFree && !resetStarted)
-  {
-    targetPos = 0; // Open servo
-    releaseswitchMotorState = true;
-    releaseTriggered = true;
-    client.publish("rollercoaster/event", "released_train_switchtrack");
-    Serial.println("[AUTO] Station bereikt, trein losgelaten");
-  }
-
-  // FASE 3: Wachten tot trein in station is & Wissel resetten
-  if (trainInStationFlag && !resetStarted)
-  {
-    stateStartTime = now;
-    resetStarted = true;
-  }
-
-  if (resetStarted && (now - stateStartTime >= 1500))
-  {
-    targetPos = 90; // Sluit servo
-    releaseswitchMotorState = false;
-    targetSpeed = -500; // Terug naar brakes
-    manualRotateTarget = "brakes";
-
-    trainInStationFlag = false;
-    resetStarted = false;
-    releaseTriggered = false; // Reset voor de volgende trein
-    Serial.println("[AUTO] Reset naar brakes gestart");
-  }
-
-  // FASE 4: Terug bij af
-  if (hallSensorBrakeConnectState && manualRotateTarget == "brakes")
-  {
-    targetSpeed = 0;
-    isSwitchtrackOccupied = false;
-    client.publish("rollercoaster/block/event", "switchtrack_free");
-    client.publish("rollercoaster/event", "resetted_switchtrack");
-    Serial.println("[AUTO] Wissel terug in beginpositie");
-  }
-}
-
 void setup()
 {
   Serial.begin(115200);
@@ -590,7 +545,7 @@ void loop()
 
   if (coasterDispatched)
   {
-    handleSwitchtrackBlock();
+    handleSwitchtrackBlockV2();
   }
 
   moveServoSmooth(releaseServo, currentPos, targetPos);

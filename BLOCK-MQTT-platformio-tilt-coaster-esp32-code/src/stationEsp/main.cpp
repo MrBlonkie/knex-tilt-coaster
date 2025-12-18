@@ -62,6 +62,12 @@ bool isLifthillOccupied = false;
 bool isNextBlockFree = false;
 bool trainLeftStation = false;
 
+bool enterStationFlag = false;
+bool startPositionFlag = false;
+bool stationSafetyFlag = false;
+bool lifthillFlag = false;
+bool lifthillSafetyFlag = false;
+bool tiltdropFlag = false;
 
 // === Helper motor stop ===
 void StopStepperMotor(AccelStepper &motor)
@@ -87,7 +93,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     manualMode = false;
     stationStepperState = false;
     liftStepperState = false;
-    coasterDispatched = false; //nog niet op esp
+    coasterDispatched = false; // nog niet op esp
   }
   else if (String(topic) == "rollercoaster/dispatch" && message == "go" && !manualMode)
   {
@@ -117,7 +123,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
       liftStepperState = true;
     }
-    if(message == "off")
+    if (message == "off")
     {
       liftStepperState = false;
     }
@@ -135,34 +141,28 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
       trainOnTiltdrop = true; // <-- zet flag
     }
-    if (message == "tiltdrop_closed")
-    {
-      trainOnTiltdrop = false;
-      
-      isLifthillOccupied = false; 
-    }
   }
   // Block System Events
-    if (String(topic) == "rollercoaster/block/event") {
-        if (message == "tiltdrop_free") isNextBlockFree = true;
-        if (message == "tiltdrop_occupied") isNextBlockFree = false;
-    }
-
-  if(String(topic) == "rollercoaster/clear/station" && message == "clear")
+  if (String(topic) == "rollercoaster/block/event")
   {
-      stationSafetyFlag = false;
-      client.publish("rollercoaster/event", "cleared_station_safety_flag");
-  }
-  if(String(topic) == "rollercoaster/clear/lifthill" && message == "clear")
-  {
-      lifthillSafetyFlag = false;
-      client.publish("rollercoaster/event", "cleared_lifthill_safety_flag");
+    if (message == "tiltdrop_free")
       isNextBlockFree = true;
-      client.publish("rollercoaster/event", "cleared_tiltdrop_block_for_lifthill");
-
+    if (message == "tiltdrop_occupied")
+      isNextBlockFree = false;
   }
 
-  if(String(topic) == "rollercoaster/estop" && message == "stop")
+  if (String(topic) == "rollercoaster/clear/station" && message == "clear")
+  {
+    stationSafetyFlag = false;
+    client.publish("rollercoaster/event", "cleared_station_safety_flag");
+  }
+  if (String(topic) == "rollercoaster/clear/lifthill" && message == "clear")
+  {
+    lifthillSafetyFlag = false;
+    client.publish("rollercoaster/event", "cleared_lifthill_safety_flag");
+  }
+
+  if (String(topic) == "rollercoaster/estop" && message == "stop")
   {
     stationStepperState = false;
     liftStepperState = false;
@@ -220,19 +220,14 @@ void updateSensors()
   hallSensorStartPositionState = digitalRead(hallSensorStartPosition) == LOW;
 }
 
-bool enterStationFlag = false;
-bool startPositionFlag = false;
-bool stationSafetyFlag = false;
-bool lifthillFlag = false;
-bool lifthillSafetyFlag = false;
-bool tiltdropFlag = false;
+void handleStationBlockV2()
+{
 
-void handleStationBlockV2() {
-  
   bool stationMovementAllowed = coasterDispatched && !stationSafetyFlag;
-  
-  //Enter Station Logic
-  if(hallSensorEnterStationState && !enterStationFlag && stationMovementAllowed){
+
+  // Enter Station Logic
+  if (hallSensorEnterStationState && !enterStationFlag && stationMovementAllowed)
+  {
     stationStepperState = true;
     enterStationFlag = true;
     isStationOccupied = true;
@@ -240,21 +235,28 @@ void handleStationBlockV2() {
     client.publish("rollercoaster/block/event", "station_occupied");
   }
 
-  //Start Position Logic
-  if(hallSensorStartPositionState){
-    if(!isLifthillOccupied && startPositionFlag && stationMovementAllowed){
+  // Start Position Logic
+  if (hallSensorStartPositionState)
+  {
+    if (!isLifthillOccupied && startPositionFlag && stationMovementAllowed)
+    {
       stationStepperState = true;
       client.publish("rollercoaster/event", "train_moves_to_lifthill");
-    } else if(isLifthillOccupied){
+    }
+    else if (isLifthillOccupied)
+    {
       stationStepperState = false;
       client.publish("rollercoaster/event", "train_waits_in_start_position");
-    } else {
+    }
+    else
+    {
       startPositionFlag = true;
     }
   }
 
-  //exit logic
-  if(hallSensorExitStationState){
+  // exit logic
+  if (hallSensorExitStationState)
+  {
     stationStepperState = false;
     enterStationFlag = false;
     startPositionFlag = false;
@@ -263,109 +265,67 @@ void handleStationBlockV2() {
     client.publish("rollercoaster/block/event", "station_free");
   }
 
- //Safety 
-  if(stationStepperState && isLifthillOccupied) {
+  // Safety
+  if (stationStepperState && isLifthillOccupied)
+  {
     stationStepperState = false;
     stationSafetyFlag = true;
     client.publish("rollercoaster/event", "station_stopped_and_train_on_station_____clear_station_to_continue");
   }
 }
 
-void handleLifthillBlockV2() {
-  
+void handleLifthillBlockV2()
+{
+
   bool lifthillMovementAllowed = coasterDispatched && isNextBlockFree && !lifthillSafetyFlag;
-  
-  //enter lifthill
-  if(hallSensorBottomLifthillState && !lifthillFlag){
+
+  // enter lifthill
+  if (hallSensorBottomLifthillState && !lifthillFlag)
+  {
     lifthillFlag = true;
     isLifthillOccupied = true;
     client.publish("rollercoaster/event", "train_on_lifthill");
     client.publish("rollercoaster/block/event", "lifthill_occupied");
   }
 
-  //lifthill on
-  if(isLifthillOccupied) {
-    if(lifthillMovementAllowed) {
+  // lifthill on
+  if (isLifthillOccupied)
+  {
+    if (lifthillMovementAllowed)
+    {
       liftStepperState = true;
       tiltdropFlag = false;
-    } else {
+    }
+    else
+    {
       liftStepperState = false;
     }
   }
 
-  //turn off lifthill
-  if(trainOnTiltdrop && !tiltdropFlag) {
+  // turn off lifthill
+  if (trainOnTiltdrop && !tiltdropFlag)
+  {
     liftStepperState = false;
     tiltdropFlag = true;
     isLifthillOccupied = false;
     lifthillFlag = false;
+    trainOnTiltdrop = false;
     client.publish("rollercoaster/event", "train_exits_lifthill");
     client.publish("rollercoaster/block/event", "lifthill_free");
   }
-  
 
-  //safety
-  if(liftStepperState && !isNextBlockFree) {
-     liftStepperState = false;
-     lifthillSafetyFlag = true;
-     client.publish("rollercoaster/event", "lifthill_stopped_and_train_on_lifthill_____clear_lifthill_to_continue");
-  }
-}
-
-void handleStationBlock() {
-  if (hallSensorEnterStationState && !hallSensorStartPositionState) {
-     stationStepperState = true;
-     trainLeftStation = false;
-     client.publish("rollercoaster/event", "train_enters_station"); 
-  }
-
-  if (hallSensorStartPositionState && !isStationOccupied && trainLeftStation) {
-     stationStepperState = false; 
-     client.publish("rollercoaster/event", "train_in_start_position");
-     client.publish("rollercoaster/block/event", "station_occupied");
-  }
-
-  if (isStationOccupied && !isLifthillOccupied || hallSensorStartPositionState && !isLifthillOccupied) {
-     stationStepperState = true;
-     isStationOccupied = true;
-     client.publish("rollercoaster/event", "train_start_position_detected");
-  }
-
-  if (hallSensorExitStationState && isStationOccupied) {
-     isStationOccupied = false; 
-     stationStepperState = false; 
-     trainLeftStation = true;   
-     
-     client.publish("rollercoaster/block/event", "station_free");
-     client.publish("rollercoaster/event", "train_exited_station");
-  }
-}
-
-void handleLifthillBlock() {
-  if (hallSensorBottomLifthillState && !isLifthillOccupied) {
-     isLifthillOccupied = true;
-     client.publish("rollercoaster/block/event", "lifthill_occupied");
-     client.publish("rollercoaster/event", "train_on_lifthill");
-  }
-
-  if (isLifthillOccupied) {
-    if (trainOnTiltdrop && !isNextBlockFree) {
-       liftStepperState = false;
-       client.publish("rollercoaster/block/event", "lifthill_free");
-       client.publish("rollercoaster/event", "train_off_lifthill");
-    } else {
-       liftStepperState = true; 
-    }
-  } else {
+  // safety
+  if (liftStepperState && !isNextBlockFree)
+  {
     liftStepperState = false;
-  }
-  if (!trainOnTiltdrop && !isLifthillOccupied) {
-     liftStepperState = false;
+    lifthillSafetyFlag = true;
+    client.publish("rollercoaster/event", "lifthill_stopped_and_train_on_lifthill_____clear_lifthill_to_continue");
   }
 }
 
-void handleMotorControl(){
-  if(stationStepperState)
+void handleMotorControl()
+{
+  if (stationStepperState)
   {
     stationStepper.setSpeed(600);
     stationStepper.runSpeed();
@@ -375,14 +335,15 @@ void handleMotorControl(){
     StopStepperMotor(stationStepper);
   }
 
-  if(liftStepperState)
+  if (liftStepperState)
   {
     digitalWrite(LIFT_ENABLE_PIN, LOW);
-    
+
     // Fan Logic
-    if (!relayState) {
-        digitalWrite(RELAY_PIN, HIGH);
-        relayState = true;
+    if (!relayState)
+    {
+      digitalWrite(RELAY_PIN, HIGH);
+      relayState = true;
     }
 
     liftStepper.setSpeed(600);
@@ -392,11 +353,12 @@ void handleMotorControl(){
   {
     StopStepperMotor(liftStepper);
     digitalWrite(LIFT_ENABLE_PIN, HIGH);
-    
+
     // Fan Logic
-    if (relayState) {
-        digitalWrite(RELAY_PIN, LOW);
-        relayState = false;
+    if (relayState)
+    {
+      digitalWrite(RELAY_PIN, LOW);
+      relayState = false;
     }
   }
 }
@@ -420,23 +382,48 @@ String lastStatus = "";
 void publishStatusIfChanged()
 {
   String status = "{";
-  status += "\"hallSensorExitStation\":" + String(hallSensorExitStationState ? "true" : "false");
-  status += ",\"hallSensorBottomLifthill\":" + String(hallSensorBottomLifthillState ? "true" : "false");
-  status += ",\"hallSensorEnterStation\":" + String(hallSensorEnterStationState ? "true" : "false");
-  status += ",\"hallSensorStartPosition\":" + String(hallSensorStartPositionState ? "true" : "false");
-  status += ",\"coasterDispatched\":" + String(coasterDispatched ? "true" : "false");
-  status += ",\"manualMode\":" + String(manualMode ? "true" : "false");
-  status += ",\"stationMotorManual\":" + String(stationMotorManual ? "true" : "false");
-  status += ",\"stationMotorState\":" + String(stationStepperState ? "true" : "false");
-  status += ",\"liftMotorManual\":" + String(liftMotorManual ? "true" : "false");
-  status += ",\"liftMotorState\":" + String(liftStepperState ? "true" : "false");
-  status += ",\"relayState\":" + String(relayState ? "true" : "false");
-  status += ",\"isStationOccupied\":" + String(isStationOccupied ? "true" : "false");
+  status += "\"sensors\":{";
+  status += "\"hallSensorExitStationState\":" + String(hallSensorExitStationState ? "true" : "false");
+  status += ",\"hallSensorBottomLifthillState\":" + String(hallSensorBottomLifthillState ? "true" : "false");
+  status += ",\"hallSensorEnterStationState\":" + String(hallSensorEnterStationState ? "true" : "false");
+  status += ",\"hallSensorStartPositionState\":" + String(hallSensorStartPositionState ? "true" : "false");
+  status += "},";
+
+  status += "\"coaster\":{";
+  status += "\"coasterDispatched\":" + String(coasterDispatched ? "true" : "false");
+  status += "},";
+
+  status += "\"mode\":{";
+  status += "\"manualMode\":" + String(manualMode ? "true" : "false");
+  status += "},";
+
+  status += "\"motors\":{";
+  status += "\"station\":{";
+  status += "\"stationMotorManual\":" + String(stationMotorManual ? "true" : "false");
+  status += ",\"stationStepperState\":" + String(stationStepperState ? "true" : "false");
+  status += "},";
+  status += "\"lift\":{";
+  status += "\"liftMotorManual\":" + String(liftMotorManual ? "true" : "false");
+  status += ",\"liftStepperState\":" + String(liftStepperState ? "true" : "false");
+  status += "}";
+  status += "},";
+
+  status += "\"blocks\":{";
+  status += "\"isStationOccupied\":" + String(isStationOccupied ? "true" : "false");
   status += ",\"isLifthillOccupied\":" + String(isLifthillOccupied ? "true" : "false");
   status += ",\"isNextBlockFree\":" + String(isNextBlockFree ? "true" : "false");
+  status += "},";
+
+  status += "\"flags\":{";
+  status += "\"enterStationFlag\":" + String(enterStationFlag ? "true" : "false");
+  status += ",\"startPositionFlag\":" + String(startPositionFlag ? "true" : "false");
+  status += ",\"stationSafetyFlag\":" + String(stationSafetyFlag ? "true" : "false");
+  status += ",\"lifthillFlag\":" + String(lifthillFlag ? "true" : "false");
+  status += ",\"lifthillSafetyFlag\":" + String(lifthillSafetyFlag ? "true" : "false");
+  status += ",\"tiltdropFlag\":" + String(tiltdropFlag ? "true" : "false");
+  status += "}";
   status += "}";
 
-  // Dit is de gedetailleerde status op de oorspronkelijke topic
   if (status != lastStatus)
   {
     client.publish("station/status", status.c_str(), true);
@@ -484,7 +471,6 @@ void setup()
   digitalWrite(LIFT_ENABLE_PIN, HIGH);
 
   pinMode(RELAY_PIN, OUTPUT);
-
 }
 
 // === Loop ===
@@ -498,7 +484,7 @@ void loop()
   publishHeartbeat();
   handleMotorControl();
 
-  if(coasterDispatched)
+  if (coasterDispatched)
   {
     // Automatische bediening
     handleStationBlockV2();

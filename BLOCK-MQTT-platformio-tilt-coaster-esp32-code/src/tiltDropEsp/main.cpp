@@ -97,6 +97,11 @@ bool isTiltdropOccupied = false;
 bool isNextBlockFree = false; // Let op: Start op FALSE (veiligheid), wacht op MQTT bericht
 bool isTiltdropResetted = false;
 
+bool trainOnTiltdropFlag = false;
+bool tiltdropOpeningFlag = false;
+bool tiltdropSafetyFlag = false;
+bool isTiltdropFreeFlag = false;
+
 String latestEventMsg = "";
 bool manualMode = false;
 
@@ -237,7 +242,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     if (String(topic) == "rollercoaster/clear/tiltdrop" && message == "clear")
     {
         tiltdropSafetyFlag = false;
-        client.publish("rollercoaster/event", "cleared_tiltdrop_safety_flag");   
+        client.publish("rollercoaster/event", "cleared_tiltdrop_safety_flag");
     }
 
     // Events van andere ESPs
@@ -305,19 +310,45 @@ String lastStatus = "";
 void publishStatusIfChanged()
 {
     String status = "{";
-    status += "\"hallSensorOnTiltdrop\":" + String(hallSensorOnTiltdropState ? "true" : "false");
-    status += ",\"hallSensorTiltdropClosed\":" + String(hallSensorTiltdropClosedState ? "true" : "false");
-    status += ",\"hallSensorTiltdropOpen\":" + String(hallSensorTiltdropOpenState ? "true" : "false");
-    status += ",\"hallSensorOffTiltdrop\":" + String(hallSensorOffTiltdropState ? "true" : "false");
-    status += ",\"cartOnTiltdrop\":" + String(cartOnTiltdrop ? "true" : "false");
+
+    status += "\"sensors\":{";
+    status += "\"hallSensorOnTiltdropState\":" + String(hallSensorOnTiltdropState ? "true" : "false");
+    status += ",\"hallSensorTiltdropClosedState\":" + String(hallSensorTiltdropClosedState ? "true" : "false");
+    status += ",\"hallSensorTiltdropOpenState\":" + String(hallSensorTiltdropOpenState ? "true" : "false");
+    status += ",\"hallSensorOffTiltdropState\":" + String(hallSensorOffTiltdropState ? "true" : "false");
+    status += "},";
+
+    status += "\"train\":{";
+    status += "\"cartOnTiltdrop\":" + String(cartOnTiltdrop ? "true" : "false");
     status += ",\"trainOnLayout\":" + String(trainOnLayout ? "true" : "false");
-    status += ",\"tiltdropMotorMoving\":" + String(tiltdropMotorMoving ? "true" : "false");
+    status += "},";
+
+    status += "\"tiltdrop\":{";
+    status += "\"tiltdropMotorMoving\":" + String(tiltdropMotorMoving ? "true" : "false");
     status += ",\"isTiltdropTrackOpen\":" + String(isTiltdropTrackOpen ? "true" : "false");
-    status += ",\"manualMode\":" + String(manualMode ? "true" : "false");
     status += ",\"releasedropMotorState\":" + String(releasedropMotorState ? "true" : "false");
-    status += ",\"isTiltdropOccupied\":" + String(isTiltdropOccupied ? "true" : "false");
+    status += "},";
+
+    status += "\"mode\":{";
+    status += "\"manualMode\":" + String(manualMode ? "true" : "false");
+    status += "},";
+
+    status += "\"blocks\":{";
+    status += "\"isTiltdropOccupied\":" + String(isTiltdropOccupied ? "true" : "false");
     status += ",\"isNextBlockFree\":" + String(isNextBlockFree ? "true" : "false");
-    status += ",\"coasterDispatched\":" + String(coasterDispatched ? "true" : "false");
+    status += "},";
+
+    status += "\"coaster\":{";
+    status += "\"coasterDispatched\":" + String(coasterDispatched ? "true" : "false");
+    status += "},";
+
+    status += "\"flags\":{";
+    status += "\"trainOnTiltdropFlag\":" + String(trainOnTiltdropFlag ? "true" : "false");
+    status += ",\"tiltdropOpeningFlag\":" + String(tiltdropOpeningFlag ? "true" : "false");
+    status += ",\"tiltdropSafetyFlag\":" + String(tiltdropSafetyFlag ? "true" : "false");
+    status += ",\"isTiltdropFreeFlag\":" + String(isTiltdropFreeFlag ? "true" : "false");
+    status += "}";
+
     status += "}";
 
     if (status != lastStatus)
@@ -335,10 +366,6 @@ void updateTiltdropSensors()
     hallSensorTiltdropOpenState = (digitalRead(hallSensorTiltdropOpen) == LOW);
     hallSensorOffTiltdropState = (digitalRead(hallSensorOffTiltdrop) == LOW);
 }
-bool trainOnTiltdropFlag = false;
-bool tiltdropOpeningFlag = false;
-bool tiltdropSafetyFlag = false;
-bool isTiltdropFreeFlag = false;
 
 void handleTiltdropBlockV2()
 {
@@ -348,6 +375,7 @@ void handleTiltdropBlockV2()
         isTiltdropOccupied = true;
         trainOnTiltdropFlag = true;
         isTiltdropResetted = false;
+        trainOnLifthill = false;
         client.publish("rollercoaster/event", "train_on_tiltdrop");
         client.publish("rollercoaster/block/event", "tiltdrop_occupied");
     }
@@ -366,45 +394,28 @@ void handleTiltdropBlockV2()
         if (releaseTimer == 0)
         {
             releaseTimer = millis();
+            Serial.println("Release timer gestart...");
         }
 
         if (millis() - releaseTimer >= delayBeforeRelease && !releasedropMotorState)
         {
-            targetPos = 0; // Servo OPEN
+            targetPos = 0;
             releasedropMotorState = true;
             client.publish("rollercoaster/event", "releasedrop_opening");
         }
-    }
-    else
-    {
-        // Reset de timer alleen als de trein NIET op de tiltdrop staat of het blok bezet is
-        if (!isTiltdropOccupied || !isNextBlockFree)
-            releaseTimer = 0;
     }
 
     // reset logic
     if (isTiltdropOccupied && releasedropMotorState && hallSensorOffTiltdropState && !tiltdropSafetyFlag)
     {
-        if (resetTimer == 0)
-        {
-            resetTimer = millis();
-        }
-
-        if (millis() - resetTimer >= delayBeforeReset)
-        {
+    
             client.publish("rollercoaster/event", "resetting_tiltdrop");
             targetPos = 90; // Servo DICHT
             releasedropMotorState = false;
             StartTiltingUp();
-
             // Cruciaal: We zetten deze vlag om de reset-sequence te markeren
             trainOnTiltdropFlag = false;
-            resetTimer = 0;
-        }
-    }
-    else
-    {
-        resetTimer = 0;
+
     }
 
     // give clear tiltdrop
@@ -418,96 +429,21 @@ void handleTiltdropBlockV2()
         client.publish("rollercoaster/event", "tiltdrop_closed_and_safe");
     }
 
-    //safety
-    if (isTiltdropOccupied) {
-    if (releasedropMotorState && !hallSensorTiltdropOpenState) {       
-        tiltdropSafetyFlag = true;
-        client.publish("rollercoaster/event", "CRITICAL_ERROR: Tiltdrop release triggered while not level!");
+    // safety
+    if (isTiltdropOccupied)
+    {
+        if (releasedropMotorState && !hallSensorTiltdropOpenState)
+        {
+            tiltdropSafetyFlag = true;
+            client.publish("rollercoaster/event", "CRITICAL_ERROR: Tiltdrop release triggered while not level!");
+        }
     }
 
-    //tiltdrop free on start
-    if(hallSensorTiltdropClosedState && !releasedropMotorState && !isTiltdropOccupied && !isTiltdropFreeFlag){
+    // tiltdrop free on start
+    if (hallSensorTiltdropClosedState && !releasedropMotorState && !isTiltdropOccupied && !isTiltdropFreeFlag)
+    {
         isTiltdropFreeFlag = true;
         client.publish("rollercoaster/block/event", "tiltdrop_free");
-    }
-
-}
-}
-
-// === LOGICA: Het Blok Systeem ===
-void handleTiltdropBlock()
-{
-    // 1. AANKOMST: Trein komt op de tilt
-    if (hallSensorOnTiltdropState && !isTiltdropOccupied)
-    {
-        isTiltdropOccupied = true;
-        trainOnLifthill = false;
-        client.publish("rollercoaster/block/event", "tiltdrop_occupied");
-        client.publish("rollercoaster/event", "train_on_tiltdrop");
-        Serial.println("BLOCK: Tiltdrop Occupied");
-    }
-
-    // 2. KANTELEN: Trein is er + We zijn nog boven + Motor staat stil
-    if (isTiltdropOccupied && hallSensorTiltdropClosedState && !tiltdropMotorMoving)
-    {
-        StartTiltingDown(); // Gebruik de helper functie!
-    }
-
-    // 3. LOSLATEN: Tilt is beneden, start de timer
-    if (isTiltdropOccupied && hallSensorTiltdropOpenState && isNextBlockFree)
-    {
-        if (releaseTimer == 0)
-        {
-            releaseTimer = millis(); // Start de timer zodra hij beneden is
-        }
-
-        // Controleer of de tijd verstreken is EN of hij nog niet geopend is
-        if (millis() - releaseTimer >= delayBeforeRelease && targetPos != 0)
-        {
-            targetPos = 0; // Servo OPEN
-            releasedropMotorState = true;
-            client.publish("rollercoaster/event", "releasedrop_opening");
-            Serial.println("BLOCK: Releasing Train after delay");
-        }
-    }
-    else
-    {
-        releaseTimer = 0; // Reset timer als niet aan de voorwaarden wordt voldaan
-    }
-
-    // 4. VERTREK: Trein is gepasseerd, start reset timer
-    if (hallSensorOffTiltdropState && isTiltdropOccupied)
-    {
-        if (resetTimer == 0)
-        {
-            resetTimer = millis(); // Start timer zodra sensor de trein niet meer ziet
-        }
-
-        if (millis() - resetTimer >= delayBeforeReset)
-        {
-            isTiltdropOccupied = false;
-            isTiltdropResetted = false;
-            resetTimer = 0; // Timer resetten voor de volgende keer
-
-            client.publish("rollercoaster/event", "releasedrop_open");
-            Serial.println("BLOCK: Tiltdrop Free - Resetting now");
-
-            targetPos = 90; // Servo dicht
-            releasedropMotorState = false;
-
-            StartTiltingUp(); // Ga weer naar boven
-        }
-    }
-    else
-    {
-        resetTimer = 0;
-    }
-
-    if (hallSensorTiltdropClosedState && !isTiltdropResetted)
-    {
-        client.publish("rollercoaster/block/event", "tiltdrop_free");
-        client.publish("rollercoaster/event", "tiltdrop_closed");
-        isTiltdropResetted = true;
     }
 }
 
@@ -622,6 +558,6 @@ void loop()
 
     if (coasterDispatched)
     {
-        handleTiltdropBlock();
+        handleTiltdropBlockV2();
     }
 }
