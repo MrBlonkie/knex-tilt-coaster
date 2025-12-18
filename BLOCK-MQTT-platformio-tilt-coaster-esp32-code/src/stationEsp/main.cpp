@@ -60,6 +60,7 @@ bool trainOnTiltdrop = false;
 bool isStationOccupied = false;
 bool isLifthillOccupied = false;
 bool isNextBlockFree = false;
+bool trainLeftStation = false;
 
 
 // === Helper motor stop ===
@@ -86,6 +87,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     manualMode = false;
     stationStepperState = false;
     liftStepperState = false;
+    coasterDispatched = false; //nog niet op esp
   }
   else if (String(topic) == "rollercoaster/dispatch" && message == "go" && !manualMode)
   {
@@ -95,6 +97,8 @@ void callback(char *topic, byte *payload, unsigned int length)
   else if (String(topic) == "rollercoaster/dispatch" && message == "stop")
   {
     coasterDispatched = false;
+    stationStepperState = false;
+    liftStepperState = false;
   }
   else if (String(topic) == "station/stationmotor" && manualMode)
   {
@@ -113,7 +117,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
       liftStepperState = true;
     }
-    else
+    if(message == "off")
     {
       liftStepperState = false;
     }
@@ -136,7 +140,6 @@ void callback(char *topic, byte *payload, unsigned int length)
       trainOnTiltdrop = false;
       
       isLifthillOccupied = false; 
-      client.publish("rollercoaster/block/event", "lifthill_free");
     }
   }
   // Block System Events
@@ -145,11 +148,18 @@ void callback(char *topic, byte *payload, unsigned int length)
         if (message == "tiltdrop_occupied") isNextBlockFree = false;
     }
 
-  if(String(topic) == "rollercoaster/reset/station" && message == "reset")
+  if(String(topic) == "rollercoaster/clear/station" && message == "clear")
   {
-      isStationOccupied = false;
-      isLifthillOccupied = false;
+      stationSafetyFlag = false;
+      client.publish("rollercoaster/event", "cleared_station_safety_flag");
+  }
+  if(String(topic) == "rollercoaster/clear/lifthill" && message == "clear")
+  {
+      lifthillSafetyFlag = false;
+      client.publish("rollercoaster/event", "cleared_lifthill_safety_flag");
       isNextBlockFree = true;
+      client.publish("rollercoaster/event", "cleared_tiltdrop_block_for_lifthill");
+
   }
 
   if(String(topic) == "rollercoaster/estop" && message == "stop")
@@ -189,6 +199,7 @@ void connectMQTT()
       client.subscribe("rollercoaster/block/event");
       client.subscribe("rollercoaster/estop");
       client.subscribe("rollercoaster/reset");
+      client.subscribe("rollercoaster/clear/station");
     }
     else
     {
@@ -209,28 +220,124 @@ void updateSensors()
   hallSensorStartPositionState = digitalRead(hallSensorStartPosition) == LOW;
 }
 
-void handleStationBlock() {
-  if (hallSensorEnterStationState && !hallSensorStartPositionState) {
-     stationStepperState = true; 
+bool enterStationFlag = false;
+bool startPositionFlag = false;
+bool stationSafetyFlag = false;
+bool lifthillFlag = false;
+bool lifthillSafetyFlag = false;
+bool tiltdropFlag = false;
+
+void handleStationBlockV2() {
+  
+  bool stationMovementAllowed = coasterDispatched && !stationSafetyFlag;
+  
+  //Enter Station Logic
+  if(hallSensorEnterStationState && !enterStationFlag && stationMovementAllowed){
+    stationStepperState = true;
+    enterStationFlag = true;
+    isStationOccupied = true;
+    client.publish("rollercoaster/event", "train_enters_station");
+    client.publish("rollercoaster/block/event", "station_occupied");
   }
 
-  if (hallSensorStartPositionState && !isStationOccupied) {
+  //Start Position Logic
+  if(hallSensorStartPositionState){
+    if(!isLifthillOccupied && startPositionFlag && stationMovementAllowed){
+      stationStepperState = true;
+      client.publish("rollercoaster/event", "train_moves_to_lifthill");
+    } else if(isLifthillOccupied){
+      stationStepperState = false;
+      client.publish("rollercoaster/event", "train_waits_in_start_position");
+    } else {
+      startPositionFlag = true;
+    }
+  }
+
+  //exit logic
+  if(hallSensorExitStationState){
+    stationStepperState = false;
+    enterStationFlag = false;
+    startPositionFlag = false;
+    isStationOccupied = false;
+    client.publish("rollercoaster/event", "train_left_station");
+    client.publish("rollercoaster/block/event", "station_free");
+  }
+
+ //Safety 
+  if(stationStepperState && isLifthillOccupied) {
+    stationStepperState = false;
+    stationSafetyFlag = true;
+    client.publish("rollercoaster/event", "station_stopped_and_train_on_station_____clear_station_to_continue");
+  }
+}
+
+void handleLifthillBlockV2() {
+  
+  bool lifthillMovementAllowed = coasterDispatched && isNextBlockFree && !lifthillSafetyFlag;
+  
+  //enter lifthill
+  if(hallSensorBottomLifthillState && !lifthillFlag){
+    lifthillFlag = true;
+    isLifthillOccupied = true;
+    client.publish("rollercoaster/event", "train_on_lifthill");
+    client.publish("rollercoaster/block/event", "lifthill_occupied");
+  }
+
+  //lifthill on
+  if(isLifthillOccupied) {
+    if(lifthillMovementAllowed) {
+      liftStepperState = true;
+      tiltdropFlag = false;
+    } else {
+      liftStepperState = false;
+    }
+  }
+
+  //turn off lifthill
+  if(trainOnTiltdrop && !tiltdropFlag) {
+    liftStepperState = false;
+    tiltdropFlag = true;
+    isLifthillOccupied = false;
+    lifthillFlag = false;
+    client.publish("rollercoaster/event", "train_exits_lifthill");
+    client.publish("rollercoaster/block/event", "lifthill_free");
+  }
+  
+
+  //safety
+  if(liftStepperState && !isNextBlockFree) {
+     liftStepperState = false;
+     lifthillSafetyFlag = true;
+     client.publish("rollercoaster/event", "lifthill_stopped_and_train_on_lifthill_____clear_lifthill_to_continue");
+  }
+}
+
+void handleStationBlock() {
+  if (hallSensorEnterStationState && !hallSensorStartPositionState) {
+     stationStepperState = true;
+     trainLeftStation = false;
+     client.publish("rollercoaster/event", "train_enters_station"); 
+  }
+
+  if (hallSensorStartPositionState && !isStationOccupied && trainLeftStation) {
      stationStepperState = false; 
- 
+     client.publish("rollercoaster/event", "train_in_start_position");
      client.publish("rollercoaster/block/event", "station_occupied");
   }
 
-  if (isStationOccupied && !isLifthillOccupied) {
+  if (isStationOccupied && !isLifthillOccupied || hallSensorStartPositionState && !isLifthillOccupied) {
      stationStepperState = true;
+     isStationOccupied = true;
+     client.publish("rollercoaster/event", "train_start_position_detected");
   }
 
   if (hallSensorExitStationState && isStationOccupied) {
      isStationOccupied = false; 
      stationStepperState = false; 
-     coasterDispatched = false;   
+     trainLeftStation = true;   
      
      client.publish("rollercoaster/block/event", "station_free");
-     Serial.println("BLOCK: Station Free");
+     client.publish("rollercoaster/event", "train_exited_station");
   }
 }
 
@@ -238,12 +345,14 @@ void handleLifthillBlock() {
   if (hallSensorBottomLifthillState && !isLifthillOccupied) {
      isLifthillOccupied = true;
      client.publish("rollercoaster/block/event", "lifthill_occupied");
-     Serial.println("BLOCK: Lifthill Occupied");
+     client.publish("rollercoaster/event", "train_on_lifthill");
   }
 
   if (isLifthillOccupied) {
     if (trainOnTiltdrop && !isNextBlockFree) {
-       liftStepperState = false; 
+       liftStepperState = false;
+       client.publish("rollercoaster/block/event", "lifthill_free");
+       client.publish("rollercoaster/event", "train_off_lifthill");
     } else {
        liftStepperState = true; 
     }
@@ -392,8 +501,8 @@ void loop()
   if(coasterDispatched)
   {
     // Automatische bediening
-    handleStationBlock();
-    handleLifthillBlock();
+    handleStationBlockV2();
+    handleLifthillBlockV2();
   }
 
   // LED updates
