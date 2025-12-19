@@ -265,13 +265,6 @@ void handleStationBlockV2()
     client.publish("rollercoaster/block/event", "station_free");
   }
 
-  // Safety
-  if (stationStepperState && isLifthillOccupied)
-  {
-    stationStepperState = false;
-    stationSafetyFlag = true;
-    client.publish("rollercoaster/event", "station_stopped_and_train_on_station_____clear_station_to_continue");
-  }
 }
 
 void handleLifthillBlockV2()

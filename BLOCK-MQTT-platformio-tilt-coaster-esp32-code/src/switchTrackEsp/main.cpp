@@ -292,17 +292,19 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
   if (String(topic) == "rollercoaster/event" && message == "train_enters_station")
   {
-    // <-- zet flag
+    trainInStationFlag = true;
+  }
+  if (String(topic) == "rollercoaster/event" && message == "train_left_station")
+  {
+    trainInStationFlag = false;
   }
   // Block System Events
   if (String(topic) == "rollercoaster/block/event")
   {
     if (message == "station_free")
       isNextBlockFree = true;
-    trainInStationFlag = false;
     if (message == "station_occupied")
       isNextBlockFree = false;
-    trainInStationFlag = true;
   }
 }
 
@@ -367,6 +369,7 @@ void publishStatusIfChanged()
   status += ",\"switchtrackResetted\":" + String(switchtrackResetted ? "true" : "false");
   status += ",\"switchtrackFreeFlag\":" + String(switchtrackFreeFlag ? "true" : "false");
   status += ",\"switchtrackSafetyFlag\":" + String(switchtrackSafetyFlag ? "true" : "false");
+  status += ",\"trainInStationFlag\":" + String(trainInStationFlag ? "true" : "false");
   status += "}";
 
   status += "}";
@@ -416,17 +419,19 @@ void handleSwitchtrackBlockV2()
 
   unsigned long now = millis();
 
-  // enter & rotate to station switchtrack
   if (hallSensorOnSwitchtrackState && !onSwitchtrackFlag && !isSwitchtrackOccupied && !switchtrackSafetyFlag)
   {
-
     if (!stabilizationStarted)
     {
       stateStartTime = now;
       stabilizationStarted = true;
       client.publish("rollercoaster/block/event", "switchtrack_occupied");
       client.publish("rollercoaster/event", "train_on_switchtrack");
+      
+      // CRUCIAL: Reset de stationsvlag hier, anders denkt de code dat de trein er al is!
+      trainInStationFlag = false; 
     }
+
     if (stabilizationStarted && (now - stateStartTime >= 2000))
     {
       onSwitchtrackFlag = true;
@@ -438,21 +443,25 @@ void handleSwitchtrackBlockV2()
       manualRotateTarget = "station";
 
       client.publish("rollercoaster/event", "rotating_switchtrack_to_station");
-      stabilizationStarted = false; // Klaar met deze fase
+      stabilizationStarted = false; 
     }
   }
 
-  // release to station
-  if (isNextBlockFree && hallSensorStationConnectState && isSwitchtrackOccupied && !isSwitchtrackMoving && !switchtrackSafetyFlag)
+  // 2. RELEASE TO STATION
+  // We voegen '!isSwitchtrackMoving' en een check op de targetSpeed toe.
+  // De trein mag PAS vertrekken als de track NIET meer beweegt en de sensor ECHT verbinding ziet.
+  if (onSwitchtrackFlag && isNextBlockFree && hallSensorStationConnectState && !isSwitchtrackMoving && !releaseTriggered && !switchtrackSafetyFlag)
   {
     targetPos = 0; // Open servo
     releaseswitchMotorState = true;
-    releaseTriggered = true;
+    releaseTriggered = true; // Deze vlag blokkeert dat we deze IF opnieuw uitvoeren
     client.publish("rollercoaster/event", "released_train_switchtrack");
   }
 
-  // reset switchtrack
-  if (releaseTriggered && trainInStationFlag && !resetSwitchtrackFlag && !switchtrackSafetyFlag)
+  // 3. RESET SWITCHTRACK
+  // Deze mag PAS triggeren als de trein daadwerkelijk de switchtrack heeft verlaten EN in het station is.
+  // Ik heb '!hallSensorOnSwitchtrackState' toegevoegd als extra check.
+  if (releaseTriggered && trainInStationFlag && !hallSensorOnSwitchtrackState && !resetSwitchtrackFlag && !switchtrackSafetyFlag)
   {
     client.publish("rollercoaster/event", "resetting_switchtrack");
     resetSwitchtrackFlag = true;
@@ -463,13 +472,14 @@ void handleSwitchtrackBlockV2()
     manualRotateTarget = "brakes";
   }
 
-  // end logic
-  if (hallSensorBrakeConnectState && !switchtrackResetted && isSwitchtrackOccupied && !isSwitchtrackMoving)
+  // 4. END LOGIC (Terug bij de brakes)
+  if (resetSwitchtrackFlag && hallSensorBrakeConnectState && !isSwitchtrackMoving && !switchtrackResetted)
   {
     switchtrackResetted = true;
     isSwitchtrackOccupied = false;
     onSwitchtrackFlag = false;
     releaseTriggered = false;
+    resetSwitchtrackFlag = false; // Reset deze voor de volgende rit
     targetSpeed = 0;
     client.publish("rollercoaster/event", "switchtrack_resetted");
     client.publish("rollercoaster/block/event", "switchtrack_free");
