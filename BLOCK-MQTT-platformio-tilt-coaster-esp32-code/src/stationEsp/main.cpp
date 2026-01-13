@@ -1,6 +1,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <AccelStepper.h>
+#include <ESP32Servo.h>
 #include <FastLED.h>
 #include "LedSetup.h"
 #include "../shared/env.h" // ssid, password, mqtt_server, mqtt_port
@@ -25,6 +26,39 @@ const long heartbeatInterval = 2500;
 
 AccelStepper stationStepper(AccelStepper::FULL4WIRE, STATION_IN1, STATION_IN3, STATION_IN2, STATION_IN4);
 bool stationStepperState = false;
+
+#define SERVO_PIN 25
+Servo enterServo;
+int currentPos = 180;
+int targetPos = 0; // Default Dicht
+unsigned long lastStep = 0;
+const unsigned long stepInterval = 2;
+
+unsigned long servoWaitTimer = 0;
+bool isServoWaiting = false;
+
+// Non-blocking servo sweep
+bool moveServoSmooth(Servo &servo, int &current, int target)
+{
+    unsigned long now = millis();
+    if (now - lastStep < stepInterval)
+        return false;
+    lastStep = now;
+
+    if (current < target)
+    {
+        current++;
+        servo.write(current);
+        return (current == target);
+    }
+    else if (current > target)
+    {
+        current--;
+        servo.write(current);
+        return (current == target);
+    }
+    return true;
+}
 
 // +++ Lifthill +++
 #define LIFT_DIR_PIN 26
@@ -231,8 +265,16 @@ void handleStationBlockV2()
     stationStepperState = true;
     enterStationFlag = true;
     isStationOccupied = true;
+    servoWaitTimer = millis();
+    isServoWaiting = true;
     client.publish("rollercoaster/event", "train_enters_station");
     client.publish("rollercoaster/block/event", "station_occupied");
+  }
+
+  if (isServoWaiting && (millis() - servoWaitTimer >= 200))
+  {
+    targetPos = 180; // Beweeg naar 90 graden na 0.5s
+    isServoWaiting = false; // Stop met wachten
   }
 
   // Start Position Logic
@@ -251,6 +293,10 @@ void handleStationBlockV2()
     else
     {
       startPositionFlag = true;
+    }
+
+    if(targetPos != 0){
+      targetPos = 0;
     }
   }
 
@@ -457,6 +503,8 @@ void setup()
   stationStepper.setMaxSpeed(800.0);
   stationStepper.setAcceleration(0);
 
+  enterServo.attach(SERVO_PIN);
+
   liftStepper.setMaxSpeed(800.0);
   liftStepper.setAcceleration(400.0);
 
@@ -476,6 +524,7 @@ void loop()
   updateSensors();
   publishHeartbeat();
   handleMotorControl();
+  moveServoSmooth(enterServo, currentPos, targetPos);
 
   if (coasterDispatched)
   {
