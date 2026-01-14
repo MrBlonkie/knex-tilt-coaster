@@ -259,6 +259,13 @@ void handleStationBlockV2()
 
   bool stationMovementAllowed = coasterDispatched && !stationSafetyFlag;
 
+  // Start after stop Logic
+  if (isStationOccupied && stationMovementAllowed) {
+      if (!(hallSensorStartPositionState && isLifthillOccupied)) {
+          stationStepperState = true;
+      }
+  }
+
   // Enter Station Logic
   if (hallSensorEnterStationState && !enterStationFlag && stationMovementAllowed)
   {
@@ -271,9 +278,10 @@ void handleStationBlockV2()
     client.publish("rollercoaster/block/event", "station_occupied");
   }
 
+  // timing enterServo Logic
   if (isServoWaiting && (millis() - servoWaitTimer >= 200))
   {
-    targetPos = 180; // Beweeg naar 90 graden na 0.5s
+    targetPos = 180; // Beweeg naar 90 graden na 0.2s
     isServoWaiting = false; // Stop met wachten
   }
 
