@@ -255,9 +255,9 @@ void callback(char *topic, byte *payload, unsigned int length)
     // Block System Events
     if (String(topic) == "rollercoaster/block/event")
     {
-        if (message == "switchtrack_free")
+        if (message == "brakes_free")
             isNextBlockFree = true;
-        if (message == "switchtrack_occupied")
+        if (message == "brakes_occupied")
             isNextBlockFree = false;
     }
 }

@@ -45,7 +45,45 @@ void updateSensors()
     hallSensorExitBrakesState = digitalRead(hallSensorExitBrakes) == LOW;
 }
 
+// === Servo config ===
+#define SERVO_PIN 25
+Servo releaseServo;
+bool releaseBrakesMotorState = false;
+
+int currentPos = 0;
+int targetPos = 90;
+unsigned long lastServoStep = 0;
+const unsigned long stepInterval = 2;
+
+bool moveServoSmooth(Servo &servo, int &current, int target)
+{
+    static unsigned long lastStepLocal = 0;
+    unsigned long now = millis();
+    if (now - lastStepLocal < stepInterval)
+        return false;
+    lastStepLocal = now;
+
+    if (current < target)
+    {
+        current++;
+        servo.write(current);
+        return (current == target);
+    }
+    else if (current > target)
+    {
+        current--;
+        servo.write(current);
+        return (current == target);
+    }
+    return true;
+}
+
+// === Flags ===
 bool manualMode = false;
+bool coasterDispatched = false;
+bool isNextBlockFree = false;
+bool isBrakesOccupied = false;
+bool brakesFlag = false;
 
 // === MQTT callback ===
 void callback(char *topic, byte *payload, unsigned int length)
@@ -69,6 +107,35 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     else if (manualMode)
     {
+        if (String(topic) == "brakes/releasebrakesmotor")
+        {
+            if (message == "open")
+            {
+                Serial.println("COMMAND: Servo Open");
+                targetPos = 0;
+                releaseBrakesMotorState = true;
+            }
+            if (message == "close")
+            {
+                Serial.println("COMMAND: Servo Close");
+                targetPos = 90;
+                releaseBrakesMotorState = false;
+            }
+        }
+    }
+
+    // Block System Events
+  if (String(topic) == "rollercoaster/block/event")
+  {
+    if (message == "switchtrack_free")
+      isNextBlockFree = true;
+    if (message == "switchtrack_occupied")
+      isNextBlockFree = false;
+  }
+
+  if (String(topic) == "rollercoaster/clear/brakes" && message == "clear")
+    {
+        client.publish("rollercoaster/block/event", "brakes_free");
     }
 }
 
@@ -85,7 +152,16 @@ void publishStatusIfChanged()
 
     status += "\"mode\":{";
     status += "\"manualMode\":" + String(manualMode ? "true" : "false");
+    status += "},";
+
+    status += "\"motors\":{";
+    status += "\"releaseBrakesMotorState\":" + String(releaseBrakesMotorState ? "true" : "false");
     status += "}";
+
+    status += "\"blocks\":{";
+    status += "\"isBrakesOccupied\":" + String(isBrakesOccupied ? "true" : "false");
+    status += ",\"isNextBlockFree\":" + String(isNextBlockFree ? "true" : "false");
+    status += "},";
 
     status += "}";
 
@@ -114,8 +190,10 @@ void connectMQTT()
             client.subscribe("rollercoaster/event");
             client.subscribe("rollercoaster/dispatch");
 
+            client.subscribe("brakes/releasebrakesmotor");
+
             client.subscribe("rollercoaster/block/event");
-            client.subscribe("rollercoaster/clear/switchtrack");
+            client.subscribe("rollercoaster/clear/brakes");
         }
         else
         {
@@ -127,9 +205,34 @@ void connectMQTT()
     }
 }
 
+void handleBrakesBlock() {
+    
+    if(hallSensorEnterBrakesState && !brakesFlag){
+        isBrakesOccupied = true;
+        client.publish("rollercoaster/event", "train_on_brakes");
+        client.publish("rollercoaster/block/event", "brakes_occupied");
+    }
+
+    if(isNextBlockFree && !brakesFlag && isBrakesOccupied){
+        targetPos = 0;
+        releaseBrakesMotorState = true;
+        brakesFlag = true;
+        client.publish("rollercoaster/event", "releasing_brakes");
+    }
+
+    if(hallSensorExitBrakesState && brakesFlag && isBrakesOccupied){
+        targetPos = 90;
+        releaseBrakesMotorState = false;
+        brakesFlag = false;
+        isBrakesOccupied = false;
+        client.publish("rollercoaster/event", "train_off_brakes");
+        client.publish("rollercoaster/block/event", "brakes_free");
+    }
+}
+
 void setup()
 {
-    Serial.begin(115200);
+    Serial.begin(9600);
 
     WiFi.begin(ssid, password);
     Serial.print("Connecting to WiFi");
@@ -147,6 +250,8 @@ void setup()
 
     pinMode(hallSensorExitBrakes, INPUT_PULLUP);
     pinMode(hallSensorEnterBrakes, INPUT_PULLUP);
+
+    releaseServo.attach(SERVO_PIN);
 }
 
 void loop()
@@ -158,4 +263,10 @@ void loop()
     publishHeartbeat();
     publishStatusIfChanged();
     updateSensors();
+
+    moveServoSmooth(releaseServo, currentPos, targetPos);
+
+    if(!manualMode){
+        handleBrakesBlock();
+    }
 }
