@@ -115,8 +115,8 @@ const int tiltStepSizeBrakes = -12;    // richting brakes
 const int tiltStepSizeStation = 12;    // richting station (reverse van brakes)
 const int tiltExtraStepsBrakes = 10;  // extra stappen na brakes
 const int tiltExtraStepsStation = 150; // extra stappen na station
-const long tiltIntervalBrakes = 110;    // interval voor tilt-update
-const long tiltIntervalStation = 130;  // interval voor tilt-update
+const long tiltIntervalBrakes = 140;    // interval voor tilt-update
+const long tiltIntervalStation = 140;  // interval voor tilt-update
 
 const int extraRotateStepsBrakes = 100;
 const int extraRotateStepsStation = 50;
@@ -306,6 +306,11 @@ void callback(char *topic, byte *payload, unsigned int length)
   if (String(topic) == "rollercoaster/event" && message == "train_left_station")
   {
     trainInStationFlag = false;
+  }
+  if (String(topic) == "rollercoaster/event" && message == "train_on_brakes")
+  {
+    tiltingStepper.move(-5);
+    rotatingStepper.move(-10);
   }
   // Block System Events
   if (String(topic) == "rollercoaster/block/event")
