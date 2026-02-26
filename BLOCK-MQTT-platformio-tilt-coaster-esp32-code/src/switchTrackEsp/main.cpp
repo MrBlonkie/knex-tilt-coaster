@@ -111,12 +111,12 @@ bool releaseTriggered = false;
 bool resetStarted = false;
 
 // === Tilt instellingen per bestemming ===
-const int tiltStepSizeBrakes = -10;    // richting brakes
+const int tiltStepSizeBrakes = -12;    // richting brakes
 const int tiltStepSizeStation = 12;    // richting station (reverse van brakes)
 const int tiltExtraStepsBrakes = 10;  // extra stappen na brakes
 const int tiltExtraStepsStation = 150; // extra stappen na station
-const long tiltIntervalBrakes = 50;    // interval voor tilt-update
-const long tiltIntervalStation = 110;  // interval voor tilt-update
+const long tiltIntervalBrakes = 110;    // interval voor tilt-update
+const long tiltIntervalStation = 130;  // interval voor tilt-update
 
 const int extraRotateStepsBrakes = 100;
 const int extraRotateStepsStation = 50;
