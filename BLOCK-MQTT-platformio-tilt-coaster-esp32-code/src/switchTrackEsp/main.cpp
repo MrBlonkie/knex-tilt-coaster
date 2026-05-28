@@ -113,16 +113,10 @@ bool resetStarted = false;
 // === Tilt instellingen per bestemming ===
 const int tiltStepSizeBrakes = -12;    // richting brakes
 const int tiltStepSizeStation = 12;    // richting station (reverse van brakes)
-const int tiltExtraStepsBrakes = 10;  // extra stappen na brakes
-const int tiltExtraStepsStation = 150; // extra stappen na station
-const long tiltIntervalBrakes = 140;    // interval voor tilt-update
-const long tiltIntervalStation = 140;  // interval voor tilt-update
-
-const int extraRotateStepsBrakes = 100;
-const int extraRotateStepsStation = 50;
-
-// Flags voor fasebeheer (onder je andere flags)
-bool doingExtraRotateSteps = false;
+const int tiltExtraStepsBrakes = 350;  // extra stappen na brakes
+const int tiltExtraStepsStation = 170; // extra stappen na station
+const long tiltIntervalBrakes = 120;    // interval voor tilt-update
+const long tiltIntervalStation = 110;  // interval voor tilt-update
 
 // Flags voor fasebeheer
 bool droppingToTarget = false;
@@ -139,88 +133,90 @@ bool switchtrackSafetyFlag = false;
 unsigned long stateStartTime = 0; // Timer voor in de state machine
 bool timerActive = false;         // Om te checken of we aan het wachten zijn
 
+// Hoeveel tilt-stappen vooruit vóór rotatie start (om de basis vrij te maken van de guiding rail)
+const int PRE_TILT_STEPS = 20;
+
+enum MovementPhase
+{
+  PHASE_IDLE,
+  PHASE_PRE_TILT, // Tilt geeft ~20 stappen voorsprong; rotatie staat stil
+  PHASE_MOVING    // Rotatie + gekoppelde tilt samen
+};
+
 void handleMovement()
 {
-  if (targetSpeed == 0 && !doingExtraRotateSteps)
+  static MovementPhase phase = PHASE_IDLE;
+  static long tiltAccumulator = 0;
+  static long lastRotPos = 0;
+
+  if (targetSpeed == 0)
   {
     rotatingStepper.stop();
     StopStepperMotor(tiltingStepper);
     isSwitchtrackMoving = false;
-    droppingToTarget = false;
-    doingExtraTiltSteps = false;
+    phase = PHASE_IDLE;
+    tiltAccumulator = 0;
     return;
   }
 
   isSwitchtrackMoving = true;
-  static long tiltAccumulator = 0;
-  static long lastRotPos = 0;
+
+  int tiltStep = (targetSpeed < 0) ? tiltStepSizeBrakes : tiltStepSizeStation;
+  long tiltThreshold = (targetSpeed < 0) ? tiltIntervalBrakes : tiltIntervalStation;
+
+  // --- FASE 0 → 1: start pre-tilt ---
+  if (phase == PHASE_IDLE)
+  {
+    phase = PHASE_PRE_TILT;
+    tiltingStepper.move(tiltStep * PRE_TILT_STEPS);
+  }
+
+  // --- FASE 1: wacht tot tilt klaar is, rotatie staat stil ---
+  if (phase == PHASE_PRE_TILT)
+  {
+    tiltingStepper.run();
+    if (tiltingStepper.distanceToGo() == 0)
+    {
+      phase = PHASE_MOVING;
+      lastRotPos = rotatingStepper.currentPosition();
+      tiltAccumulator = 0;
+    }
+    return;
+  }
+
+  // --- FASE 2: rotatie + gekoppelde tilt ---
+  if (targetSpeed < 0 && hallSensorBrakeConnectState)
+  {
+    rotatingStepper.stop();
+    tiltingStepper.stop();
+    targetSpeed = 0;
+    phase = PHASE_IDLE;
+    Serial.println("Brakes sensor active: motors stopped.");
+    return;
+  }
+  if (targetSpeed > 0 && hallSensorMiddleState)
+  {
+    rotatingStepper.stop();
+    tiltingStepper.stop();
+    targetSpeed = 0;
+    phase = PHASE_IDLE;
+    Serial.println("Station sensor active: motors stopped.");
+    return;
+  }
+
+  rotatingStepper.setSpeed(targetSpeed);
+  rotatingStepper.runSpeed();
+
   long rotDelta = abs(rotatingStepper.currentPosition() - lastRotPos);
   tiltAccumulator += rotDelta;
   lastRotPos = rotatingStepper.currentPosition();
 
-  // AFHANDELING EXTRA STAPPEN (Fase 2)
-  if (doingExtraRotateSteps)
+  if (tiltAccumulator >= tiltThreshold)
   {
-    rotatingStepper.run(); // Beweegt naar het doel gezet door .move()
-    tiltingStepper.run();  // Tilt motor kan eventueel ook nog uitlopen indien nodig
-
-    if (rotatingStepper.distanceToGo() == 0)
-    {
-      doingExtraRotateSteps = false;
-      targetSpeed = 0; // Stop de logica volledig
-      rotatingStepper.stop();
-      tiltingStepper.stop();
-      isSwitchtrackMoving = false;
-      Serial.println("Extra rotation steps completed. Movement stopped.");
-    }
-    return; // Sla de rest van de functie over zolang we in deze fase zitten
+    tiltingStepper.move(tiltStep);
+    tiltAccumulator = 0;
   }
-
-  // === BEWEGING NAAR BRAKES (Negatieve snelheid) ===
-  if (targetSpeed < 0)
-  {
-    if (hallSensorBrakeConnectState)
-    {
-      Serial.println("Brakes sensor hit: starting extra steps.");
-      doingExtraRotateSteps = true;
-      rotatingStepper.move(-extraRotateStepsBrakes); // Relatieve beweging in negatieve richting
-      tiltAccumulator = 0;
-      return;
-    }
-
-    rotatingStepper.setSpeed(targetSpeed);
-    rotatingStepper.runSpeed();
-
-    if (tiltAccumulator >= tiltIntervalBrakes)
-    {
-      tiltingStepper.move(tiltStepSizeBrakes);
-      tiltAccumulator = 0;
-    }
-    tiltingStepper.run();
-  }
-
-  // === BEWEGING NAAR STATION (Positieve snelheid) ===
-  else if (targetSpeed > 0)
-  {
-    if (hallSensorStationConnectState)
-    {
-      Serial.println("Station sensor hit: starting extra steps.");
-      doingExtraRotateSteps = true;
-      rotatingStepper.move(extraRotateStepsStation); // Relatieve beweging in positieve richting
-      tiltAccumulator = 0;
-      return;
-    }
-
-    rotatingStepper.setSpeed(targetSpeed);
-    rotatingStepper.runSpeed();
-
-    if (tiltAccumulator >= tiltIntervalStation)
-    {
-      tiltingStepper.move(tiltStepSizeStation);
-      tiltAccumulator = 0;
-    }
-    tiltingStepper.run();
-  }
+  tiltingStepper.run();
 }
 
 // === MQTT callback ===
@@ -306,11 +302,6 @@ void callback(char *topic, byte *payload, unsigned int length)
   if (String(topic) == "rollercoaster/event" && message == "train_left_station")
   {
     trainInStationFlag = false;
-  }
-  if (String(topic) == "rollercoaster/event" && message == "train_on_brakes")
-  {
-    tiltingStepper.move(-5);
-    rotatingStepper.move(-10);
   }
   // Block System Events
   if (String(topic) == "rollercoaster/block/event")
@@ -441,9 +432,9 @@ void handleSwitchtrackBlockV2()
       stabilizationStarted = true;
       client.publish("rollercoaster/block/event", "switchtrack_occupied");
       client.publish("rollercoaster/event", "train_on_switchtrack");
-
+      
       // CRUCIAL: Reset de stationsvlag hier, anders denkt de code dat de trein er al is!
-      trainInStationFlag = false;
+      trainInStationFlag = false; 
     }
 
     if (stabilizationStarted && (now - stateStartTime >= 2000))
@@ -457,7 +448,7 @@ void handleSwitchtrackBlockV2()
       manualRotateTarget = "station";
 
       client.publish("rollercoaster/event", "rotating_switchtrack_to_station");
-      stabilizationStarted = false;
+      stabilizationStarted = false; 
     }
   }
 

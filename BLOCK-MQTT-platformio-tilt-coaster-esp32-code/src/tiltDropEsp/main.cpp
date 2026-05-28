@@ -87,6 +87,10 @@ bool hallSensorTiltdropClosedState = false;
 bool hallSensorTiltdropOpenState = false;
 bool hallSensorOffTiltdropState = false;
 
+// === Mist Effect ===
+#define mistEffectRelay 5
+bool mistEffectState = false;
+
 // === Logic Flags ===
 bool cartOnTiltdrop = false;
 bool ledDropControlState = false;
@@ -227,6 +231,19 @@ void callback(char *topic, byte *payload, unsigned int length)
                 releasedropMotorState = false;
             }
         }
+        if (String(topic) == "tiltdrop/misteffect")
+        {
+            if (message == "on")
+            {
+                digitalWrite(mistEffectRelay, LOW);
+                mistEffectState = true;
+            }
+            if (message == "off")
+            {
+                digitalWrite(mistEffectRelay, HIGH);
+                mistEffectState = false;
+            }
+        }
     }
 
     if (String(topic) == "rollercoaster/dispatch" && message == "go" && !manualMode)
@@ -277,6 +294,7 @@ void connectMQTT()
             client.subscribe("tiltdrop/manual");
             client.subscribe("tiltdrop/tiltdropmotor");
             client.subscribe("tiltdrop/releasedropmotor");
+            client.subscribe("tiltdrop/misteffect");
             client.subscribe("rollercoaster/event");
             client.subscribe("rollercoaster/dispatch");
 
@@ -327,6 +345,7 @@ void publishStatusIfChanged()
     status += "\"tiltdropMotorMoving\":" + String(tiltdropMotorMoving ? "true" : "false");
     status += ",\"isTiltdropTrackOpen\":" + String(isTiltdropTrackOpen ? "true" : "false");
     status += ",\"releasedropMotorState\":" + String(releasedropMotorState ? "true" : "false");
+    status += ",\"misteffectState\":" + String(mistEffectState ? "true" : "false");
     status += "},";
 
     status += "\"mode\":{";
@@ -395,6 +414,8 @@ void handleTiltdropBlockV2()
         {
             releaseTimer = millis();
             Serial.println("Release timer gestart...");
+            digitalWrite(mistEffectRelay, LOW);
+            mistEffectState = true;
         }
 
         if (millis() - releaseTimer >= delayBeforeRelease && !releasedropMotorState)
@@ -402,6 +423,8 @@ void handleTiltdropBlockV2()
             targetPos = 0;
             releasedropMotorState = true;
             client.publish("rollercoaster/event", "releasedrop_opening");
+            digitalWrite(mistEffectRelay, HIGH);
+            mistEffectState = false;
         }
     }
 
@@ -528,6 +551,9 @@ void setup()
     pinMode(hallSensorTiltdropClosed, INPUT_PULLUP);
     pinMode(hallSensorTiltdropOpen, INPUT_PULLUP);
     pinMode(hallSensorOffTiltdrop, INPUT_PULLUP);
+    
+    pinMode(mistEffectRelay, OUTPUT);
+    digitalWrite(mistEffectRelay, HIGH);
 
     // Motor
     tiltTrackStepper.setMaxSpeed(MOTOR_SPEED_FAST);

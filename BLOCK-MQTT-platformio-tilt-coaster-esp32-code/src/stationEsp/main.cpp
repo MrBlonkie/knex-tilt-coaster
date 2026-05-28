@@ -31,33 +31,40 @@ bool stationStepperState = false;
 Servo enterServo;
 int currentPos = 180;
 int targetPos = 0; // Default Dicht
-unsigned long lastStep = 0;
+unsigned long lastStepEnter = 0;
 const unsigned long stepInterval = 2;
 
 unsigned long servoWaitTimer = 0;
 bool isServoWaiting = false;
 
-// Non-blocking servo sweep
-bool moveServoSmooth(Servo &servo, int &current, int target)
-{
-    unsigned long now = millis();
-    if (now - lastStep < stepInterval)
-        return false;
-    lastStep = now;
+#define GATE_SERVO_PIN 15
+Servo gatesServo;
+int currentPos2 = 180;
+int targetPos2 = 0;
+bool gatesServoState = false;
+unsigned long lastStepGates = 0;
 
-    if (current < target)
-    {
-        current++;
-        servo.write(current);
-        return (current == target);
-    }
-    else if (current > target)
-    {
-        current--;
-        servo.write(current);
-        return (current == target);
-    }
-    return true;
+// Non-blocking servo sweep
+bool moveServoSmooth(Servo &servo, int &current, int target, unsigned long &lastStepVar)
+{
+  unsigned long now = millis();
+  if (now - lastStepVar < stepInterval)
+    return false;
+  lastStepVar = now;
+
+  if (current < target)
+  {
+    current++;
+    servo.write(current);
+    return (current == target);
+  }
+  else if (current > target)
+  {
+    current--;
+    servo.write(current);
+    return (current == target);
+  }
+  return true;
 }
 
 // +++ Lifthill +++
@@ -162,6 +169,21 @@ void callback(char *topic, byte *payload, unsigned int length)
       liftStepperState = false;
     }
   }
+  else if (String(topic) == "station/gatesmotor" && manualMode)
+  {
+    if (message == "open")
+    {
+      // gates servo open
+      targetPos2 = 3;
+      gatesServoState = true;
+    }
+    else
+    {
+      // gates servo close
+      targetPos2 = 108;
+      gatesServoState = false;
+    }
+  }
   else if (String(topic) == "rollercoaster/control/auto")
   {
     if (message == "on")
@@ -224,6 +246,7 @@ void connectMQTT()
       client.subscribe("station/dispatch");
       client.subscribe("station/stationmotor");
       client.subscribe("station/lifthillmotor");
+      client.subscribe("station/gatesmotor");
 
       client.subscribe("rollercoaster/control/auto");
       client.subscribe("rollercoaster/event");
@@ -260,10 +283,12 @@ void handleStationBlockV2()
   bool stationMovementAllowed = coasterDispatched && !stationSafetyFlag;
 
   // Start after stop Logic
-  if (isStationOccupied && stationMovementAllowed) {
-      if (!(hallSensorStartPositionState && isLifthillOccupied)) {
-          stationStepperState = true;
-      }
+  if (isStationOccupied && stationMovementAllowed)
+  {
+    if (!(hallSensorStartPositionState && isLifthillOccupied))
+    {
+      stationStepperState = true;
+    }
   }
 
   // Enter Station Logic
@@ -281,13 +306,21 @@ void handleStationBlockV2()
   // timing enterServo Logic
   if (isServoWaiting && (millis() - servoWaitTimer >= 200))
   {
-    targetPos = 180; // Beweeg naar 90 graden na 0.2s
+    targetPos = 180;        // Beweeg naar 90 graden na 0.2s
     isServoWaiting = false; // Stop met wachten
   }
 
   // Start Position Logic
   if (hallSensorStartPositionState)
   {
+    stationStepperState = false;
+    targetPos2 = 3;
+    gatesServoState = true;
+    illis() - servoWaitTimer >= 700;
+    targetPos2 = 108;
+    gatesServoState = false;
+
+
     if (!isLifthillOccupied && startPositionFlag && stationMovementAllowed)
     {
       stationStepperState = true;
@@ -303,7 +336,8 @@ void handleStationBlockV2()
       startPositionFlag = true;
     }
 
-    if(targetPos != 0){
+    if (targetPos != 0)
+    {
       targetPos = 0;
     }
   }
@@ -318,7 +352,6 @@ void handleStationBlockV2()
     client.publish("rollercoaster/event", "train_left_station");
     client.publish("rollercoaster/block/event", "station_free");
   }
-
 }
 
 void handleLifthillBlockV2()
@@ -448,6 +481,7 @@ void publishStatusIfChanged()
   status += "\"station\":{";
   status += "\"stationMotorManual\":" + String(stationMotorManual ? "true" : "false");
   status += ",\"stationStepperState\":" + String(stationStepperState ? "true" : "false");
+  status += ",\"gatesServoState\":" + String(gatesServoState ? "true" : "false");
   status += "},";
   status += "\"lift\":{";
   status += "\"liftMotorManual\":" + String(liftMotorManual ? "true" : "false");
@@ -512,6 +546,7 @@ void setup()
   stationStepper.setAcceleration(0);
 
   enterServo.attach(SERVO_PIN);
+  gatesServo.attach(GATE_SERVO_PIN);
 
   liftStepper.setMaxSpeed(800.0);
   liftStepper.setAcceleration(400.0);
@@ -532,7 +567,8 @@ void loop()
   updateSensors();
   publishHeartbeat();
   handleMotorControl();
-  moveServoSmooth(enterServo, currentPos, targetPos);
+  moveServoSmooth(enterServo, currentPos, targetPos, lastStepEnter);
+  moveServoSmooth(gatesServo, currentPos2, targetPos2, lastStepGates);
 
   if (coasterDispatched)
   {
