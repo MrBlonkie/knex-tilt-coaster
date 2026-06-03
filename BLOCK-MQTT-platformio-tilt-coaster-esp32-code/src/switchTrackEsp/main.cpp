@@ -26,14 +26,6 @@ const long heartbeatInterval = 2500;
 #define TILTING_IN3 15
 #define TILTING_IN4 18
 
-// === Helper motor stop ===
-void StopStepperMotor(AccelStepper &motor)
-{
-  motor.stop();
-  motor.setCurrentPosition(motor.currentPosition());
-  motor.moveTo(motor.currentPosition());
-}
-
 // === Servo config ===
 #define SERVO_PIN 33
 Servo releaseServo;
@@ -44,19 +36,6 @@ int targetPos = 90;
 unsigned long lastServoStep = 0;
 const unsigned long stepInterval = 2;
 
-// === Status variabalen voor beweging ===
-long lastTiltStep = 0;
-// PAS OP: Als dit interval te klein is, gaat hij weer constant draaien.
-// 1000 is een veilige startwaarde.
-const long tiltInterval = 100;
-const int tiltStepSize = -60; // Iets verhoogd (was -5) om het effect duidelijker te maken, pas aan indien nodig.
-
-// Logica vlaggen
-bool droppingToStation = false;
-bool doingExtraSteps = false;
-
-// Instelling: Hoeveel stappen EXTRA na het zien van de stationsensor?
-const int extraTiltSteps = 50;
 
 bool moveServoSmooth(Servo &servo, int &current, int target)
 {
@@ -110,17 +89,13 @@ bool isNextBlockFree = false;
 bool releaseTriggered = false;
 bool resetStarted = false;
 
-// === Tilt instellingen per bestemming ===
-const int tiltStepSizeBrakes = -12;    // richting brakes
-const int tiltStepSizeStation = 12;    // richting station (reverse van brakes)
-const int tiltExtraStepsBrakes = 350;  // extra stappen na brakes
-const int tiltExtraStepsStation = 170; // extra stappen na station
-const long tiltIntervalBrakes = 120;    // interval voor tilt-update
-const long tiltIntervalStation = 110;  // interval voor tilt-update
+// === Bewegings-instellingen ===
+const int TILT_FREE_STEPS = 150;      // Stappen om los te komen van de huidige guiding rail
+const int TILT_SEAT_STEPS = 200;      // Stappen om in de nieuwe guiding rail te plaatsen
+const float ROTATE_SPEED = 400.0;     // Rotatiesnelheid (steps/sec)
+const float TILT_FREE_SPEED = 250.0;  // Tiltsnelheid tijdens vrijkomen
+const float TILT_SEAT_SPEED = 150.0;  // Langzame snelheid voor zachte plaatsing in guiding rail
 
-// Flags voor fasebeheer
-bool droppingToTarget = false;
-bool doingExtraTiltSteps = false;
 bool trainInStationFlag = false;
 bool isSwitchtrackMoving = false;
 
@@ -133,90 +108,92 @@ bool switchtrackSafetyFlag = false;
 unsigned long stateStartTime = 0; // Timer voor in de state machine
 bool timerActive = false;         // Om te checken of we aan het wachten zijn
 
-// Hoeveel tilt-stappen vooruit vóór rotatie start (om de basis vrij te maken van de guiding rail)
-const int PRE_TILT_STEPS = 20;
-
 enum MovementPhase
 {
   PHASE_IDLE,
-  PHASE_PRE_TILT, // Tilt geeft ~20 stappen voorsprong; rotatie staat stil
-  PHASE_MOVING    // Rotatie + gekoppelde tilt samen
+  PHASE_TILT_FREE,  // Tilt weg van huidige guiding rail
+  PHASE_ROTATE,     // Draai naar doelstelling (sensor-gestuurd)
+  PHASE_TILT_SEAT,  // Tilt zacht in nieuwe guiding rail
 };
 
 void handleMovement()
 {
   static MovementPhase phase = PHASE_IDLE;
-  static long tiltAccumulator = 0;
-  static long lastRotPos = 0;
+  static int tiltDir = 0;
 
-  if (targetSpeed == 0)
+  // Emergency stop: targetSpeed op 0 gezet van buitenaf tijdens beweging
+  if (targetSpeed == 0 && phase != PHASE_IDLE)
   {
     rotatingStepper.stop();
-    StopStepperMotor(tiltingStepper);
-    isSwitchtrackMoving = false;
+    tiltingStepper.stop();
     phase = PHASE_IDLE;
-    tiltAccumulator = 0;
+    isSwitchtrackMoving = false;
     return;
   }
 
-  isSwitchtrackMoving = true;
-
-  int tiltStep = (targetSpeed < 0) ? tiltStepSizeBrakes : tiltStepSizeStation;
-  long tiltThreshold = (targetSpeed < 0) ? tiltIntervalBrakes : tiltIntervalStation;
-
-  // --- FASE 0 → 1: start pre-tilt ---
-  if (phase == PHASE_IDLE)
+  if (targetSpeed == 0 && phase == PHASE_IDLE)
   {
-    phase = PHASE_PRE_TILT;
-    tiltingStepper.move(tiltStep * PRE_TILT_STEPS);
+    isSwitchtrackMoving = false;
+    return;
   }
 
-  // --- FASE 1: wacht tot tilt klaar is, rotatie staat stil ---
-  if (phase == PHASE_PRE_TILT)
+  // --- START: nieuwe beweging ---
+  if (phase == PHASE_IDLE)
+  {
+    tiltDir = (targetSpeed > 0) ? 1 : -1;
+    isSwitchtrackMoving = true;
+
+    tiltingStepper.setMaxSpeed(TILT_FREE_SPEED);
+    tiltingStepper.setAcceleration(200);
+    tiltingStepper.move(tiltDir * TILT_FREE_STEPS);
+    phase = PHASE_TILT_FREE;
+    return;
+  }
+
+  // --- FASE 1: Tilt vrij van huidige guiding rail ---
+  if (phase == PHASE_TILT_FREE)
   {
     tiltingStepper.run();
     if (tiltingStepper.distanceToGo() == 0)
     {
-      phase = PHASE_MOVING;
-      lastRotPos = rotatingStepper.currentPosition();
-      tiltAccumulator = 0;
+      rotatingStepper.setMaxSpeed(ROTATE_SPEED);
+      rotatingStepper.setSpeed(tiltDir * ROTATE_SPEED);
+      phase = PHASE_ROTATE;
     }
     return;
   }
 
-  // --- FASE 2: rotatie + gekoppelde tilt ---
-  if (targetSpeed < 0 && hallSensorBrakeConnectState)
+  // --- FASE 2: Roteer naar doelstelling ---
+  if (phase == PHASE_ROTATE)
   {
-    rotatingStepper.stop();
-    tiltingStepper.stop();
-    targetSpeed = 0;
-    phase = PHASE_IDLE;
-    Serial.println("Brakes sensor active: motors stopped.");
+    bool arrived = (tiltDir > 0) ? hallSensorStationConnectState : hallSensorBrakeConnectState;
+
+    if (arrived)
+    {
+      rotatingStepper.stop();
+      tiltingStepper.setMaxSpeed(TILT_SEAT_SPEED);
+      tiltingStepper.setAcceleration(100);
+      tiltingStepper.move(tiltDir * TILT_SEAT_STEPS);
+      phase = PHASE_TILT_SEAT;
+      return;
+    }
+
+    rotatingStepper.runSpeed();
     return;
   }
-  if (targetSpeed > 0 && hallSensorMiddleState)
+
+  // --- FASE 3: Tilt zacht in nieuwe guiding rail ---
+  if (phase == PHASE_TILT_SEAT)
   {
-    rotatingStepper.stop();
-    tiltingStepper.stop();
-    targetSpeed = 0;
-    phase = PHASE_IDLE;
-    Serial.println("Station sensor active: motors stopped.");
+    tiltingStepper.run();
+    if (tiltingStepper.distanceToGo() == 0)
+    {
+      isSwitchtrackMoving = false;
+      targetSpeed = 0;
+      phase = PHASE_IDLE;
+    }
     return;
   }
-
-  rotatingStepper.setSpeed(targetSpeed);
-  rotatingStepper.runSpeed();
-
-  long rotDelta = abs(rotatingStepper.currentPosition() - lastRotPos);
-  tiltAccumulator += rotDelta;
-  lastRotPos = rotatingStepper.currentPosition();
-
-  if (tiltAccumulator >= tiltThreshold)
-  {
-    tiltingStepper.move(tiltStep);
-    tiltAccumulator = 0;
-  }
-  tiltingStepper.run();
 }
 
 // === MQTT callback ===
