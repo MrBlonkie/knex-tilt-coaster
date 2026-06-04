@@ -148,6 +148,8 @@ void handleMovement()
     rotatingStepper.stop();
     tiltingStepper.stop();
     phase = PHASE_IDLE;
+    tiltingStepper.stop();
+    phase = PHASE_IDLE;
     isSwitchtrackMoving = false;
     return;
   }
