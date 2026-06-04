@@ -446,6 +446,7 @@ void handleTiltdropBlockV2()
             client.publish("rollercoaster/block/event", "layout_occupied");
             targetPos = 90; // Servo DICHT
             releasedropMotorState = false;
+            releaseTimer = 0;
             StartTiltingUp();
             trainOnTiltdropFlag = false;
     }
