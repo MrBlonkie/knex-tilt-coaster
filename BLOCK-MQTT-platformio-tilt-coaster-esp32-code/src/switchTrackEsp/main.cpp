@@ -565,7 +565,7 @@ void handleSwitchtrackBlockV2()
   }
 
   // switchtrack free on start
-  if (hallSensorBrakeConnect && !isSwitchtrackOccupied && !isSwitchtrackMoving && !switchtrackFreeFlag)
+  if (hallSensorBrakeConnectState && !isSwitchtrackOccupied && !isSwitchtrackMoving && !switchtrackFreeFlag)
   {
     client.publish("rollercoaster/block/event", "switchtrack_free");
     switchtrackFreeFlag = true;
