@@ -156,12 +156,12 @@ void publishStatusIfChanged()
 
     status += "\"motors\":{";
     status += "\"releaseBrakesMotorState\":" + String(releaseBrakesMotorState ? "true" : "false");
-    status += "}";
+    status += "},";
 
     status += "\"blocks\":{";
     status += "\"isBrakesOccupied\":" + String(isBrakesOccupied ? "true" : "false");
     status += ",\"isNextBlockFree\":" + String(isNextBlockFree ? "true" : "false");
-    status += "},";
+    status += "}";
 
     status += "}";
 
