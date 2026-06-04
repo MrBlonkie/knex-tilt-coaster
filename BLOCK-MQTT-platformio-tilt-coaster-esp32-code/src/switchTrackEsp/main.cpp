@@ -26,14 +26,6 @@ const long heartbeatInterval = 2500;
 #define TILTING_IN3 15
 #define TILTING_IN4 18
 
-// === Helper motor stop ===
-void StopStepperMotor(AccelStepper &motor)
-{
-  motor.stop();
-  motor.setCurrentPosition(motor.currentPosition());
-  motor.moveTo(motor.currentPosition());
-}
-
 // === Servo config ===
 #define SERVO_PIN 33
 Servo releaseServo;
@@ -44,19 +36,6 @@ int targetPos = 90;
 unsigned long lastServoStep = 0;
 const unsigned long stepInterval = 2;
 
-// === Status variabalen voor beweging ===
-long lastTiltStep = 0;
-// PAS OP: Als dit interval te klein is, gaat hij weer constant draaien.
-// 1000 is een veilige startwaarde.
-const long tiltInterval = 100;
-const int tiltStepSize = -60; // Iets verhoogd (was -5) om het effect duidelijker te maken, pas aan indien nodig.
-
-// Logica vlaggen
-bool droppingToStation = false;
-bool doingExtraSteps = false;
-
-// Instelling: Hoeveel stappen EXTRA na het zien van de stationsensor?
-const int extraTiltSteps = 50;
 
 bool moveServoSmooth(Servo &servo, int &current, int target)
 {
@@ -110,17 +89,26 @@ bool isNextBlockFree = false;
 bool releaseTriggered = false;
 bool resetStarted = false;
 
-// === Tilt instellingen per bestemming ===
-const int tiltStepSizeBrakes = -12;    // richting brakes
-const int tiltStepSizeStation = 12;    // richting station (reverse van brakes)
-const int tiltExtraStepsBrakes = 350;  // extra stappen na brakes
-const int tiltExtraStepsStation = 170; // extra stappen na station
-const long tiltIntervalBrakes = 120;    // interval voor tilt-update
-const long tiltIntervalStation = 110;  // interval voor tilt-update
+// === Beweging richting BRAKES ===
+const int   BRAKES_TILT_FREE_STEPS     = 70;   // Initiële tilt om los te komen van de station guiding rail
+const int   BRAKES_ROTATE_PARTIAL_STEPS = 800;  // Vaste rotatiestappen vóór mid-tilt
+const int   BRAKES_TILT_MID_STEPS      = 100;   // Extra tiltstappen na gedeeltelijke rotatie
+const float BRAKES_ROTATE_SPEED        = 400.0; // Rotatiesnelheid (steps/sec)
+const float BRAKES_TILT_SPEED          = 250.0; // Tiltsnelheid voor free en mid
+const int   BRAKES_ROTATE_EXTRA_STEPS  = 50;    // Extra rotatiestappen na brakes sensor
+const int   BRAKES_TILT_SEAT_STEPS     = 0;   // Tiltstappen voor zachte plaatsing in brakes guiding rail
+const float BRAKES_TILT_SEAT_SPEED     = 150.0; // Langzame snelheid voor zachte plaatsing
 
-// Flags voor fasebeheer
-bool droppingToTarget = false;
-bool doingExtraTiltSteps = false;
+// === Beweging richting STATION ===
+const int   STATION_TILT_FREE_STEPS     = 50;   // Initiële tilt om los te komen van de brakes guiding rail
+const int   STATION_ROTATE_PARTIAL_STEPS = 900;  // Vaste rotatiestappen vóór mid-tilt
+const int   STATION_TILT_MID_STEPS      = 70;   // Extra tiltstappen na gedeeltelijke rotatie
+const float STATION_ROTATE_SPEED        = 400.0; // Rotatiesnelheid (steps/sec)
+const float STATION_TILT_SPEED          = 250.0; // Tiltsnelheid voor free en mid
+const int   STATION_ROTATE_EXTRA_STEPS  = 50;     // Extra r  otatiestappen na station sensor
+const int   STATION_TILT_SEAT_STEPS     = 0;   // Tiltstappen voor zachte plaatsing in station guiding rail
+const float STATION_TILT_SEAT_SPEED     = 150.0; // Langzame snelheid voor zachte plaatsing
+
 bool trainInStationFlag = false;
 bool isSwitchtrackMoving = false;
 
@@ -133,90 +121,165 @@ bool switchtrackSafetyFlag = false;
 unsigned long stateStartTime = 0; // Timer voor in de state machine
 bool timerActive = false;         // Om te checken of we aan het wachten zijn
 
-// Hoeveel tilt-stappen vooruit vóór rotatie start (om de basis vrij te maken van de guiding rail)
-const int PRE_TILT_STEPS = 20;
-
 enum MovementPhase
 {
   PHASE_IDLE,
-  PHASE_PRE_TILT, // Tilt geeft ~20 stappen voorsprong; rotatie staat stil
-  PHASE_MOVING    // Rotatie + gekoppelde tilt samen
+  PHASE_TILT_FREE,        // Initiële tilt om los te komen van huidige guiding rail
+  PHASE_ROTATE_PARTIAL,   // Vaste rotatiestappen vóór mid-tilt
+  PHASE_TILT_MID,         // Mid-tiltstappen na gedeeltelijke rotatie
+  PHASE_ROTATE,           // Roteer tot aankomstsensor
+  PHASE_ROTATE_EXTRA,     // Extra rotatiestappen na aankomstsensor
+  PHASE_TILT_SEAT,        // Zachte plaatsing in nieuwe guiding rail
 };
 
 void handleMovement()
 {
   static MovementPhase phase = PHASE_IDLE;
-  static long tiltAccumulator = 0;
-  static long lastRotPos = 0;
+  static int tiltDir = 0;
 
-  if (targetSpeed == 0)
+  // Gecachete waarden per beweging (ingesteld bij START)
+  static int   s_tiltFreeSteps, s_rotatePartialSteps, s_tiltMidSteps;
+  static int   s_rotateExtraSteps, s_tiltSeatSteps;
+  static float s_rotateSpeed, s_tiltSpeed, s_tiltSeatSpeed;
+
+  // Emergency stop
+  if (targetSpeed == 0 && phase != PHASE_IDLE)
   {
     rotatingStepper.stop();
-    StopStepperMotor(tiltingStepper);
-    isSwitchtrackMoving = false;
+    tiltingStepper.stop();
     phase = PHASE_IDLE;
-    tiltAccumulator = 0;
+    isSwitchtrackMoving = false;
     return;
   }
 
-  isSwitchtrackMoving = true;
-
-  int tiltStep = (targetSpeed < 0) ? tiltStepSizeBrakes : tiltStepSizeStation;
-  long tiltThreshold = (targetSpeed < 0) ? tiltIntervalBrakes : tiltIntervalStation;
-
-  // --- FASE 0 → 1: start pre-tilt ---
-  if (phase == PHASE_IDLE)
+  if (targetSpeed == 0 && phase == PHASE_IDLE)
   {
-    phase = PHASE_PRE_TILT;
-    tiltingStepper.move(tiltStep * PRE_TILT_STEPS);
+    isSwitchtrackMoving = false;
+    return;
   }
 
-  // --- FASE 1: wacht tot tilt klaar is, rotatie staat stil ---
-  if (phase == PHASE_PRE_TILT)
+  // --- START: cache richting-specifieke config ---
+  if (phase == PHASE_IDLE)
+  {
+    tiltDir = (targetSpeed > 0) ? 1 : -1;
+    isSwitchtrackMoving = true;
+
+    if (tiltDir < 0)
+    {
+      s_tiltFreeSteps      = BRAKES_TILT_FREE_STEPS;
+      s_rotatePartialSteps = BRAKES_ROTATE_PARTIAL_STEPS;
+      s_tiltMidSteps       = BRAKES_TILT_MID_STEPS;
+      s_rotateSpeed        = BRAKES_ROTATE_SPEED;
+      s_tiltSpeed          = BRAKES_TILT_SPEED;
+      s_rotateExtraSteps   = BRAKES_ROTATE_EXTRA_STEPS;
+      s_tiltSeatSteps      = BRAKES_TILT_SEAT_STEPS;
+      s_tiltSeatSpeed      = BRAKES_TILT_SEAT_SPEED;
+    }
+    else
+    {
+      s_tiltFreeSteps      = STATION_TILT_FREE_STEPS;
+      s_rotatePartialSteps = STATION_ROTATE_PARTIAL_STEPS;
+      s_tiltMidSteps       = STATION_TILT_MID_STEPS;
+      s_rotateSpeed        = STATION_ROTATE_SPEED;
+      s_tiltSpeed          = STATION_TILT_SPEED;
+      s_rotateExtraSteps   = STATION_ROTATE_EXTRA_STEPS;
+      s_tiltSeatSteps      = STATION_TILT_SEAT_STEPS;
+      s_tiltSeatSpeed      = STATION_TILT_SEAT_SPEED;
+    }
+
+    tiltingStepper.setMaxSpeed(s_tiltSpeed);
+    tiltingStepper.setAcceleration(200);
+    tiltingStepper.move(tiltDir * s_tiltFreeSteps);
+    phase = PHASE_TILT_FREE;
+    return;
+  }
+
+  // --- FASE 1: Initiële tilt ---
+  if (phase == PHASE_TILT_FREE)
   {
     tiltingStepper.run();
     if (tiltingStepper.distanceToGo() == 0)
     {
-      phase = PHASE_MOVING;
-      lastRotPos = rotatingStepper.currentPosition();
-      tiltAccumulator = 0;
+      rotatingStepper.setMaxSpeed(s_rotateSpeed);
+      rotatingStepper.setAcceleration(400);
+      rotatingStepper.move(tiltDir * s_rotatePartialSteps);
+      phase = PHASE_ROTATE_PARTIAL;
     }
     return;
   }
 
-  // --- FASE 2: rotatie + gekoppelde tilt ---
-  if (targetSpeed < 0 && hallSensorBrakeConnectState)
+  // --- FASE 2: Gedeeltelijke rotatie ---
+  if (phase == PHASE_ROTATE_PARTIAL)
   {
-    rotatingStepper.stop();
-    tiltingStepper.stop();
-    targetSpeed = 0;
-    phase = PHASE_IDLE;
-    Serial.println("Brakes sensor active: motors stopped.");
-    return;
-  }
-  if (targetSpeed > 0 && hallSensorMiddleState)
-  {
-    rotatingStepper.stop();
-    tiltingStepper.stop();
-    targetSpeed = 0;
-    phase = PHASE_IDLE;
-    Serial.println("Station sensor active: motors stopped.");
+    rotatingStepper.run();
+    if (rotatingStepper.distanceToGo() == 0)
+    {
+      tiltingStepper.setMaxSpeed(s_tiltSpeed);
+      tiltingStepper.setAcceleration(200);
+      tiltingStepper.move(tiltDir * s_tiltMidSteps);
+      phase = PHASE_TILT_MID;
+    }
     return;
   }
 
-  rotatingStepper.setSpeed(targetSpeed);
-  rotatingStepper.runSpeed();
-
-  long rotDelta = abs(rotatingStepper.currentPosition() - lastRotPos);
-  tiltAccumulator += rotDelta;
-  lastRotPos = rotatingStepper.currentPosition();
-
-  if (tiltAccumulator >= tiltThreshold)
+  // --- FASE 3: Mid-tilt ---
+  if (phase == PHASE_TILT_MID)
   {
-    tiltingStepper.move(tiltStep);
-    tiltAccumulator = 0;
+    tiltingStepper.run();
+    if (tiltingStepper.distanceToGo() == 0)
+    {
+      rotatingStepper.setMaxSpeed(s_rotateSpeed);
+      rotatingStepper.setSpeed(tiltDir * s_rotateSpeed);
+      phase = PHASE_ROTATE;
+    }
+    return;
   }
-  tiltingStepper.run();
+
+  // --- FASE 4: Roteer tot aankomstsensor ---
+  if (phase == PHASE_ROTATE)
+  {
+    bool arrived = (tiltDir > 0) ? hallSensorStationConnectState : hallSensorBrakeConnectState;
+
+    if (arrived)
+    {
+      rotatingStepper.stop();
+      rotatingStepper.setMaxSpeed(s_rotateSpeed);
+      rotatingStepper.setAcceleration(400);
+      rotatingStepper.move(tiltDir * s_rotateExtraSteps);
+      phase = PHASE_ROTATE_EXTRA;
+      return;
+    }
+
+    rotatingStepper.runSpeed();
+    return;
+  }
+
+  // --- FASE 5: Extra rotatie na sensor ---
+  if (phase == PHASE_ROTATE_EXTRA)
+  {
+    rotatingStepper.run();
+    if (rotatingStepper.distanceToGo() == 0)
+    {
+      tiltingStepper.setMaxSpeed(s_tiltSeatSpeed);
+      tiltingStepper.setAcceleration(100);
+      tiltingStepper.move(tiltDir * s_tiltSeatSteps);
+      phase = PHASE_TILT_SEAT;
+    }
+    return;
+  }
+
+  // --- FASE 6: Zachte plaatsing in guiding rail ---
+  if (phase == PHASE_TILT_SEAT)
+  {
+    tiltingStepper.run();
+    if (tiltingStepper.distanceToGo() == 0)
+    {
+      isSwitchtrackMoving = false;
+      targetSpeed = 0;
+      phase = PHASE_IDLE;
+    }
+    return;
+  }
 }
 
 // === MQTT callback ===
@@ -254,7 +317,6 @@ void callback(char *topic, byte *payload, unsigned int length)
         Serial.println("COMMAND: Rotate to Brakes");
         targetSpeed = -500;
         manualRotateTarget = "brakes";
-        lastTiltStep = rotatingStepper.currentPosition(); // Reset lastTiltStep zodat hij niet meteen een enorme sprong maakt als de motor lang stil stond
       }
       if (message == "off")
       {
