@@ -316,7 +316,7 @@ void handleStationBlockV2()
     stationStepperState = false;
     targetPos2 = 3;
     gatesServoState = true;
-    illis() - servoWaitTimer >= 700;
+    millis() - servoWaitTimer >= 700;
     targetPos2 = 108;
     gatesServoState = false;
 
