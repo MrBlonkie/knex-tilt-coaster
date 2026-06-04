@@ -137,6 +137,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
         isBrakesOccupied = false;
         client.publish("rollercoaster/block/event", "brakes_free");
+        client.publish("rollercoaster/block/event", "layout_free");
     }
 
   if (String(topic) == "rollercoaster/estop" && message == "stop")
