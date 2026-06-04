@@ -106,6 +106,10 @@ bool trainLeftStation = false;
 bool enterStationFlag = false;
 bool startPositionFlag = false;
 bool stationSafetyFlag = false;
+
+unsigned long gatesOpenTimer = 0;
+bool isGatesSequenceActive = false;
+bool isGatesSequenceDone = false;
 bool lifthillFlag = false;
 bool lifthillSafetyFlag = false;
 bool tiltdropFlag = false;
@@ -311,35 +315,43 @@ void handleStationBlockV2()
     isServoWaiting = false; // Stop met wachten
   }
 
-  // Start Position Logic
-  if (hallSensorStartPositionState)
+  // Start Position Logic - trigger once on arrival
+  if (hallSensorStartPositionState && !startPositionFlag)
   {
     stationStepperState = false;
+    startPositionFlag = true;
     targetPos2 = 3;
     gatesServoState = true;
-    millis() - servoWaitTimer >= 700;
+    gatesOpenTimer = millis();
+    isGatesSequenceActive = true;
+    isGatesSequenceDone = false;
+
+    if (targetPos != 0)
+      targetPos = 0;
+  }
+
+  // Close gates after delay
+  if (isGatesSequenceActive && (millis() - gatesOpenTimer >= 700))
+  {
     targetPos2 = 108;
     gatesServoState = false;
+    isGatesSequenceActive = false;
+    isGatesSequenceDone = true;
+  }
 
-
-    if (!isLifthillOccupied && startPositionFlag && stationMovementAllowed)
+  // Restart motor after gates closed
+  if (isGatesSequenceDone && hallSensorStartPositionState)
+  {
+    if (!isLifthillOccupied && stationMovementAllowed)
     {
       stationStepperState = true;
+      isGatesSequenceDone = false;
       client.publish("rollercoaster/event", "train_moves_to_lifthill");
     }
     else if (isLifthillOccupied)
     {
       stationStepperState = false;
       client.publish("rollercoaster/event", "train_waits_in_start_position");
-    }
-    else
-    {
-      startPositionFlag = true;
-    }
-
-    if (targetPos != 0)
-    {
-      targetPos = 0;
     }
   }
 
@@ -349,6 +361,8 @@ void handleStationBlockV2()
     stationStepperState = false;
     enterStationFlag = false;
     startPositionFlag = false;
+    isGatesSequenceActive = false;
+    isGatesSequenceDone = false;
     isStationOccupied = false;
     client.publish("rollercoaster/event", "train_left_station");
     client.publish("rollercoaster/block/event", "station_free");
