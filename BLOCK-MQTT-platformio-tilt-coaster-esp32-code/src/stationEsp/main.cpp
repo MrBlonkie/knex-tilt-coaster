@@ -93,15 +93,12 @@ bool hallSensorStartPositionState = false;
 // === Helper Bools / State Control ===
 bool coasterDispatched = false;
 bool manualMode = false;
-bool stationMotorManual = false;
-bool liftMotorManual = false;
 
 bool trainOnTiltdrop = false;
 
 bool isStationOccupied = false;
 bool isLifthillOccupied = false;
 bool isNextBlockFree = false;
-bool trainLeftStation = false;
 
 bool enterStationFlag = false;
 bool startPositionFlag = false;
@@ -247,7 +244,6 @@ void connectMQTT()
 
       // Subscribe naar control topics
       client.subscribe("station/manual");
-      client.subscribe("station/dispatch");
       client.subscribe("station/stationmotor");
       client.subscribe("station/lifthillmotor");
       client.subscribe("station/gatesmotor");
@@ -255,7 +251,6 @@ void connectMQTT()
       client.subscribe("rollercoaster/control/auto");
       client.subscribe("rollercoaster/event");
       client.subscribe("rollercoaster/dispatch");
-      client.subscribe("rollercoaster/sensor");
 
       client.subscribe("rollercoaster/block/event");
       client.subscribe("rollercoaster/estop");
@@ -494,13 +489,11 @@ void publishStatusIfChanged()
 
   status += "\"motors\":{";
   status += "\"station\":{";
-  status += "\"stationMotorManual\":" + String(stationMotorManual ? "true" : "false");
-  status += ",\"stationStepperState\":" + String(stationStepperState ? "true" : "false");
+  status += "\"stationStepperState\":" + String(stationStepperState ? "true" : "false");
   status += ",\"gatesServoState\":" + String(gatesServoState ? "true" : "false");
   status += "},";
   status += "\"lift\":{";
-  status += "\"liftMotorManual\":" + String(liftMotorManual ? "true" : "false");
-  status += ",\"liftStepperState\":" + String(liftStepperState ? "true" : "false");
+  status += "\"liftStepperState\":" + String(liftStepperState ? "true" : "false");
   status += "}";
   status += "},";
 
