@@ -285,7 +285,7 @@ void handleStationBlockV2()
   // Start after stop Logic
   if (isStationOccupied && stationMovementAllowed)
   {
-    if (!(hallSensorStartPositionState && isLifthillOccupied))
+    if (!(hallSensorStartPositionState && isLifthillOccupied) && !isGatesSequenceActive && !isGatesSequenceDone)
     {
       stationStepperState = true;
     }
