@@ -135,6 +135,7 @@ void callback(char *topic, byte *payload, unsigned int length)
 
   if (String(topic) == "rollercoaster/clear/brakes" && message == "clear")
     {
+        isBrakesOccupied = false;
         client.publish("rollercoaster/block/event", "brakes_free");
     }
 
