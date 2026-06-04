@@ -272,9 +272,9 @@ void callback(char *topic, byte *payload, unsigned int length)
     // Block System Events
     if (String(topic) == "rollercoaster/block/event")
     {
-        if (message == "brakes_free")
+        if (message == "layout_free")
             isNextBlockFree = true;
-        if (message == "brakes_occupied")
+        if (message == "layout_occupied")
             isNextBlockFree = false;
     }
 
@@ -442,14 +442,12 @@ void handleTiltdropBlockV2()
     // reset logic
     if (isTiltdropOccupied && releasedropMotorState && hallSensorOffTiltdropState && !tiltdropSafetyFlag)
     {
-    
             client.publish("rollercoaster/event", "resetting_tiltdrop");
+            client.publish("rollercoaster/block/event", "layout_occupied");
             targetPos = 90; // Servo DICHT
             releasedropMotorState = false;
             StartTiltingUp();
-            // Cruciaal: We zetten deze vlag om de reset-sequence te markeren
             trainOnTiltdropFlag = false;
-
     }
 
     // give clear tiltdrop

@@ -237,6 +237,7 @@ void handleBrakesBlock() {
         isBrakesOccupied = false;
         client.publish("rollercoaster/event", "train_off_brakes");
         client.publish("rollercoaster/block/event", "brakes_free");
+        client.publish("rollercoaster/block/event", "layout_free");
     }
 }
 
