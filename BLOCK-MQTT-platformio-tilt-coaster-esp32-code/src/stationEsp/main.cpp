@@ -257,6 +257,7 @@ void connectMQTT()
       client.subscribe("rollercoaster/estop");
       client.subscribe("rollercoaster/reset");
       client.subscribe("rollercoaster/clear/station");
+      client.subscribe("rollercoaster/clear/lifthill");
     }
     else
     {
