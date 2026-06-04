@@ -84,6 +84,7 @@ bool coasterDispatched = false;
 bool isNextBlockFree = false;
 bool isBrakesOccupied = false;
 bool brakesFlag = false;
+bool isLayoutFree = false;
 
 // === MQTT callback ===
 void callback(char *topic, byte *payload, unsigned int length)
@@ -131,6 +132,10 @@ void callback(char *topic, byte *payload, unsigned int length)
       isNextBlockFree = true;
     if (message == "switchtrack_occupied")
       isNextBlockFree = false;
+    if (message == "layout_free")
+      isLayoutFree = true;
+    if (message == "layout_occupied")
+      isLayoutFree = false;
   }
 
   if (String(topic) == "rollercoaster/clear/brakes" && message == "clear")
@@ -171,6 +176,7 @@ void publishStatusIfChanged()
     status += "\"blocks\":{";
     status += "\"isBrakesOccupied\":" + String(isBrakesOccupied ? "true" : "false");
     status += ",\"isNextBlockFree\":" + String(isNextBlockFree ? "true" : "false");
+    status += ",\"isLayoutFree\":" + String(isLayoutFree ? "true" : "false");
     status += "}";
 
     status += "}";
