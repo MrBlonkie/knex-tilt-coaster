@@ -277,6 +277,17 @@ void callback(char *topic, byte *payload, unsigned int length)
         if (message == "brakes_occupied")
             isNextBlockFree = false;
     }
+
+    if (String(topic) == "rollercoaster/estop" && message == "stop")
+    {
+        tiltTrackStepper.stop();
+        motorRunState = IDLE;
+        tiltdropMotorMoving = false;
+        coasterDispatched = false;
+        targetPos = 90;
+        releasedropMotorState = false;
+        client.publish("rollercoaster/event", "estop_tiltdrop");
+    }
 }
 
 // === Setup & Connect (Standaard) ===

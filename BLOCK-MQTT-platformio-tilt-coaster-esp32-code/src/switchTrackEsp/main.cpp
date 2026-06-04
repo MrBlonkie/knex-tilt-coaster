@@ -375,6 +375,15 @@ void callback(char *topic, byte *payload, unsigned int length)
     if (message == "station_occupied")
       isNextBlockFree = false;
   }
+
+  if (String(topic) == "rollercoaster/estop" && message == "stop")
+  {
+    targetSpeed = 0;
+    coasterDispatched = false;
+    targetPos = 90;
+    releaseswitchMotorState = false;
+    client.publish("rollercoaster/event", "estop_switchtrack");
+  }
 }
 
 // === Publish Heartbeat ===
@@ -472,6 +481,7 @@ void connectMQTT()
 
       client.subscribe("rollercoaster/block/event");
       client.subscribe("rollercoaster/clear/switchtrack");
+      client.subscribe("rollercoaster/estop");
     }
     else
     {

@@ -137,6 +137,14 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
         client.publish("rollercoaster/block/event", "brakes_free");
     }
+
+  if (String(topic) == "rollercoaster/estop" && message == "stop")
+  {
+    targetPos = 90;
+    releaseBrakesMotorState = false;
+    coasterDispatched = false;
+    client.publish("rollercoaster/event", "estop_brakes");
+  }
 }
 
 // === Publish Status ===
@@ -194,6 +202,7 @@ void connectMQTT()
 
             client.subscribe("rollercoaster/block/event");
             client.subscribe("rollercoaster/clear/brakes");
+            client.subscribe("rollercoaster/estop");
         }
         else
         {
