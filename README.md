@@ -1,11 +1,4 @@
-# knex-tilt-coaster
+Prototype video: https://www.youtube.com/watch?v=h58qSegKc38
 
-youtube link protottype:
-https://www.youtube.com/watch?v=h58qSegKc38
-
-
-
-
-<img src="/pictures/tiltdrop_WIP.jpg">
-
+<img src="/pictures/blue-edit-DSC_0136.JPG">
 
