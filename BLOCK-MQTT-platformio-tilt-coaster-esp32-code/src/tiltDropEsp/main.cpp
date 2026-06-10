@@ -17,6 +17,10 @@ const char *connectivityTopic = "rollercoaster/tiltdrop/status";
 unsigned long lastHeartbeat = 0;
 const long heartbeatInterval = 2500;
 
+// === MQTT Retry Config ===
+unsigned long lastMqttRetry = 0;
+const unsigned long mqttRetryInterval = 2000;
+
 // === Tilt-track motor config ===
 #define IN1 18
 #define IN2 19
@@ -293,34 +297,35 @@ void callback(char *topic, byte *payload, unsigned int length)
 // === Setup & Connect (Standaard) ===
 void connectMQTT()
 {
+    if (client.connected()) return;
+    if (lastMqttRetry > 0 && millis() - lastMqttRetry < mqttRetryInterval) return;
+    lastMqttRetry = millis();
+
     clientId = "roller-" + String(deviceName) + "-" + String((uint32_t)ESP.getEfuseMac());
-    while (!client.connected())
+    Serial.print("Connecting MQTT...");
+    if (client.connect(clientId.c_str()))
     {
-        Serial.print("Connecting MQTT...");
-        if (client.connect(clientId.c_str()))
-        {
-            Serial.println("connected");
-            client.publish(connectivityTopic, "online", true);
+        Serial.println("connected");
+        client.publish(connectivityTopic, "online", true);
 
-            client.subscribe("tiltdrop/manual");
-            client.subscribe("tiltdrop/tiltdropmotor");
-            client.subscribe("tiltdrop/releasedropmotor");
-            client.subscribe("tiltdrop/misteffect");
-            client.subscribe("rollercoaster/event");
-            client.subscribe("rollercoaster/dispatch");
+        client.subscribe("tiltdrop/manual");
+        client.subscribe("tiltdrop/tiltdropmotor");
+        client.subscribe("tiltdrop/releasedropmotor");
+        client.subscribe("tiltdrop/misteffect");
+        client.subscribe("rollercoaster/event");
+        client.subscribe("rollercoaster/dispatch");
 
-            client.subscribe("rollercoaster/block/event"); // Belangrijk!
+        client.subscribe("rollercoaster/block/event");
 
-            client.subscribe("rollercoaster/estop");
-            client.subscribe("rollercoaster/reset");
-            client.subscribe("rollercoaster/clear/tiltdrop");
-        }
-        else
-        {
-            Serial.print("failed, rc=");
-            Serial.println(client.state());
-            delay(2000);
-        }
+        client.subscribe("rollercoaster/estop");
+        client.subscribe("rollercoaster/reset");
+        client.subscribe("rollercoaster/clear/tiltdrop");
+    }
+    else
+    {
+        Serial.print("failed, rc=");
+        Serial.println(client.state());
+        Serial.println(", retrying in 2s...");
     }
 }
 
@@ -539,10 +544,12 @@ void setup()
 {
     Serial.begin(115200);
     WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED)
     {
-        delay(300);
-        Serial.print(".");
+        unsigned long t = millis();
+        while (WiFi.status() != WL_CONNECTED)
+        {
+            if (millis() - t >= 300) { t = millis(); Serial.print("."); }
+        }
     }
     Serial.println("Connected!");
 

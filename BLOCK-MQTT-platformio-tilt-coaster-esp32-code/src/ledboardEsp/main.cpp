@@ -155,6 +155,10 @@ void setup() {
 }
 
 void loop() {
+    static unsigned long lastFrame = 0;
+    if (millis() - lastFrame < 30) return;
+    lastFrame = millis();
+
     FastLED.clear();
 
     switch (currentState) {
@@ -165,7 +169,6 @@ void loop() {
     }
 
     FastLED.show();
-    delay(30);
 
     // DEMO SWITCH: Elke 6 seconden naar de volgende fase
     static unsigned long lastSwitch = 0;

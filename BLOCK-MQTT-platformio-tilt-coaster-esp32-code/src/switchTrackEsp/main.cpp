@@ -15,6 +15,10 @@ const char *connectivityTopic = "rollercoaster/switchtrack/status";
 unsigned long lastHeartbeat = 0;
 const long heartbeatInterval = 2500;
 
+// === MQTT Retry Config ===
+unsigned long lastMqttRetry = 0;
+const unsigned long mqttRetryInterval = 2000;
+
 // === Motor Config ===
 #define ROTATING_IN1 19
 #define ROTATING_IN2 21
@@ -462,34 +466,33 @@ void publishStatusIfChanged()
 // === Connect MQTT ===
 void connectMQTT()
 {
+  if (client.connected()) return;
+  if (lastMqttRetry > 0 && millis() - lastMqttRetry < mqttRetryInterval) return;
+  lastMqttRetry = millis();
+
   clientId = "roller-" + String(deviceName) + "-" + String((uint32_t)ESP.getEfuseMac());
-
-  while (!client.connected())
+  Serial.print("Connecting to MQTT...");
+  if (client.connect(clientId.c_str()))
   {
-    Serial.print("Connecting to MQTT...");
-    if (client.connect(clientId.c_str()))
-    {
-      Serial.println("connected");
-      client.publish(connectivityTopic, "online", true);
+    Serial.println("connected");
+    client.publish(connectivityTopic, "online", true);
 
-      client.subscribe("switchtrack/manual");
-      client.subscribe("switchtrack/rotatemotor");
-      client.subscribe("switchtrack/releaseswitchtrackmotor");
-      client.subscribe("rollercoaster/control/auto");
-      client.subscribe("rollercoaster/event");
-      client.subscribe("rollercoaster/dispatch");
+    client.subscribe("switchtrack/manual");
+    client.subscribe("switchtrack/rotatemotor");
+    client.subscribe("switchtrack/releaseswitchtrackmotor");
+    client.subscribe("rollercoaster/control/auto");
+    client.subscribe("rollercoaster/event");
+    client.subscribe("rollercoaster/dispatch");
 
-      client.subscribe("rollercoaster/block/event");
-      client.subscribe("rollercoaster/clear/switchtrack");
-      client.subscribe("rollercoaster/estop");
-    }
-    else
-    {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(", retrying in 2s...");
-      delay(2000);
-    }
+    client.subscribe("rollercoaster/block/event");
+    client.subscribe("rollercoaster/clear/switchtrack");
+    client.subscribe("rollercoaster/estop");
+  }
+  else
+  {
+    Serial.print("failed, rc=");
+    Serial.print(client.state());
+    Serial.println(", retrying in 2s...");
   }
 }
 
@@ -594,10 +597,12 @@ void setup()
 
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED)
   {
-    delay(300);
-    Serial.print(".");
+    unsigned long t = millis();
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      if (millis() - t >= 300) { t = millis(); Serial.print("."); }
+    }
   }
   Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
 

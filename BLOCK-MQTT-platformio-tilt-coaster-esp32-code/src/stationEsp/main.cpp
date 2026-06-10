@@ -17,6 +17,10 @@ const char *connectivityTopic = "rollercoaster/station/status";
 unsigned long lastHeartbeat = 0;
 const long heartbeatInterval = 2500;
 
+// === MQTT Retry Config ===
+unsigned long lastMqttRetry = 0;
+const unsigned long mqttRetryInterval = 2000;
+
 // === Motor Config ===
 // +++ Station +++
 #define STATION_IN1 18
@@ -229,42 +233,38 @@ void callback(char *topic, byte *payload, unsigned int length)
 // === MQTT connect zonder LWT, met Initiële Status op Heartbeat Topic ===
 void connectMQTT()
 {
+  if (client.connected()) return;
+  if (lastMqttRetry > 0 && millis() - lastMqttRetry < mqttRetryInterval) return;
+  lastMqttRetry = millis();
+
   clientId = "roller-" + String(deviceName) + "-" + String((uint32_t)ESP.getEfuseMac());
-
-  while (!client.connected())
+  Serial.print("Connecting to MQTT...");
+  if (client.connect(clientId.c_str()))
   {
-    Serial.print("Connecting to MQTT...");
-    // Geen LWT meer, dus client.connect() zonder extra parameters
-    if (client.connect(clientId.c_str()))
-    {
-      Serial.println("connected");
+    Serial.println("connected");
 
-      // Publiceer online status op het specifieke connectiviteit-topic (retained)
-      client.publish(connectivityTopic, "online", true);
+    client.publish(connectivityTopic, "online", true);
 
-      // Subscribe naar control topics
-      client.subscribe("station/manual");
-      client.subscribe("station/stationmotor");
-      client.subscribe("station/lifthillmotor");
-      client.subscribe("station/gatesmotor");
+    client.subscribe("station/manual");
+    client.subscribe("station/stationmotor");
+    client.subscribe("station/lifthillmotor");
+    client.subscribe("station/gatesmotor");
 
-      client.subscribe("rollercoaster/control/auto");
-      client.subscribe("rollercoaster/event");
-      client.subscribe("rollercoaster/dispatch");
+    client.subscribe("rollercoaster/control/auto");
+    client.subscribe("rollercoaster/event");
+    client.subscribe("rollercoaster/dispatch");
 
-      client.subscribe("rollercoaster/block/event");
-      client.subscribe("rollercoaster/estop");
-      client.subscribe("rollercoaster/reset");
-      client.subscribe("rollercoaster/clear/station");
-      client.subscribe("rollercoaster/clear/lifthill");
-    }
-    else
-    {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(", retrying in 2s...");
-      delay(2000);
-    }
+    client.subscribe("rollercoaster/block/event");
+    client.subscribe("rollercoaster/estop");
+    client.subscribe("rollercoaster/reset");
+    client.subscribe("rollercoaster/clear/station");
+    client.subscribe("rollercoaster/clear/lifthill");
+  }
+  else
+  {
+    Serial.print("failed, rc=");
+    Serial.print(client.state());
+    Serial.println(", retrying in 2s...");
   }
 }
 
@@ -528,10 +528,12 @@ void setup()
   // WiFi
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED)
   {
-    delay(300);
-    Serial.print(".");
+    unsigned long t = millis();
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      if (millis() - t >= 300) { t = millis(); Serial.print("."); }
+    }
   }
   Serial.println("Connected! IP: " + WiFi.localIP().toString());
 
